@@ -62,6 +62,7 @@ ExecStartPre=$APP_DIR/.venv/bin/python $APP_DIR/accounts.py refresh-if-stale 24
 ExecStart=$APP_DIR/.venv/bin/python $APP_DIR/main.py
 Restart=always
 RestartSec=10
+TimeoutStartSec=20min
 Environment=PYTHONUNBUFFERED=1
 Environment=HOME=$USER_HOME
 
@@ -69,19 +70,19 @@ Environment=HOME=$USER_HOME
 WantedBy=multi-user.target
 EOF
 
-cat <<EOF | $SUDO tee /usr/local/bin/tiktoker-accounts >/dev/null
+cat <<'EOF' | $SUDO tee /usr/local/bin/tiktoker-accounts >/dev/null
 #!/usr/bin/env bash
-cd "$APP_DIR"
+cd /opt/TikToker
 if [ "$#" -eq 0 ]; then
   set -- show
 fi
-exec "$APP_DIR/.venv/bin/python" "$APP_DIR/accounts.py" "$@"
+exec /opt/TikToker/.venv/bin/python /opt/TikToker/accounts.py "$@"
 EOF
 
-cat <<EOF | $SUDO tee /usr/local/bin/tiktoker-import >/dev/null
+cat <<'EOF' | $SUDO tee /usr/local/bin/tiktoker-import >/dev/null
 #!/usr/bin/env bash
-cd "$APP_DIR"
-exec "$APP_DIR/.venv/bin/python" "$APP_DIR/import_cookies.py" "$@"
+cd /opt/TikToker
+exec /opt/TikToker/.venv/bin/python /opt/TikToker/import_cookies.py "$@"
 EOF
 
 $SUDO chmod +x /usr/local/bin/tiktoker-accounts /usr/local/bin/tiktoker-import
