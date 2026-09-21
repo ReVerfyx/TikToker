@@ -5,6 +5,9 @@ import zipfile
 from pathlib import Path
 
 
+AUTH_NAMES = {"sessionid", "sessionid_ss", "sid_tt"}
+
+
 def cookie_list(data):
     if isinstance(data, list):
         return data
@@ -43,6 +46,23 @@ def to_netscape(cookies):
     return "\n".join(lines) + "\n"
 
 
+def auth_status(cookies):
+    names = {str(c.get("name", "")).strip() for c in cookies if isinstance(c, dict)}
+    return sorted(names & AUTH_NAMES)
+
+
+def save_one(cookies, dest, source_name):
+    dest.write_text(to_netscape(cookies), encoding="utf-8")
+    found = auth_status(cookies)
+    if found:
+        print(f"[OK] {source_name} -> {dest} | auth: {', '.join(found)}")
+    else:
+        print(
+            f"[WARN] {source_name} -> {dest} | нет sessionid/sessionid_ss/sid_tt; "
+            "файл импортирован, но TikTok-авторизация может не пройти"
+        )
+
+
 def main():
     if len(sys.argv) != 2:
         print("Использование: python import_cookies.py cookies.zip")
@@ -52,21 +72,39 @@ def main():
     out = Path("cookies")
     out.mkdir(exist_ok=True)
 
+    # Не смешиваем новый импорт со старыми account*.txt.
+    for old in out.glob("account*.txt"):
+        old.unlink()
+
+    imported = 0
+    warnings = 0
+
     if src.suffix.lower() == ".zip":
         with zipfile.ZipFile(src) as z:
-            names = [n for n in z.namelist() if n.lower().endswith(".json")]
+            names = sorted(n for n in z.namelist() if n.lower().endswith(".json"))
             if not names:
                 raise SystemExit("В ZIP нет JSON-файлов")
+
             for i, name in enumerate(names, 1):
                 data = json.loads(z.read(name).decode("utf-8-sig"))
-                dest = out / f"account{i}.txt"
-                dest.write_text(to_netscape(cookie_list(data)), encoding="utf-8")
-                print(f"{name} -> {dest}")
+                cookies = cookie_list(data)
+                dest = out / f"account{i:03d}.txt"
+                save_one(cookies, dest, name)
+                imported += 1
+                if not auth_status(cookies):
+                    warnings += 1
     else:
         data = json.loads(src.read_text(encoding="utf-8-sig"))
-        dest = out / "account1.txt"
-        dest.write_text(to_netscape(cookie_list(data)), encoding="utf-8")
-        print(f"{src} -> {dest}")
+        cookies = cookie_list(data)
+        dest = out / "account001.txt"
+        save_one(cookies, dest, src.name)
+        imported = 1
+        warnings = 0 if auth_status(cookies) else 1
+
+    print()
+    print(f"Импортировано аккаунтов: {imported}")
+    print(f"Без основной auth-cookie: {warnings}")
+    print("TikToker автоматически найдёт все cookies/account*.txt.")
 
 
 if __name__ == "__main__":
