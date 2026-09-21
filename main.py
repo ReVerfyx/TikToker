@@ -285,10 +285,10 @@ def gemini(info: dict[str, Any], cfg: dict[str, Any]) -> tuple[str, list[str]] |
     if not ai.get("enabled") or ai.get("provider") != "gemini" or not ai.get("api_key"):
         return None
 
-    model = str(ai.get("model", "gemini-2.5-flash"))
+    model = str(ai.get("model", "gemini-3.5-flash-lite"))
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
-        + model + ":generateContent?key=" + str(ai["api_key"])
+        + model + ":generateContent"
     )
     prompt = (
         "Создай краткую русскую подпись и тематические хештеги для видео. "
@@ -301,6 +301,7 @@ def gemini(info: dict[str, Any], cfg: dict[str, Any]) -> tuple[str, list[str]] |
     try:
         r = requests.post(
             url,
+            headers={"x-goog-api-key": str(ai["api_key"])},
             json={"contents": [{"parts": [{"text": prompt}]}]},
             timeout=30,
         )
@@ -407,7 +408,7 @@ def upload_one(row: sqlite3.Row, cfg: dict[str, Any]) -> None:
     tc = cfg.get("tiktok", {})
     uploader = TikTokUploader(
         cookies=str(cookie),
-        browser=str(tc.get("browser", "chrome")),
+        browser=str(tc.get("browser", "chromium")),
         headless=bool(tc.get("headless", True)),
     )
     uploader.upload_video(str(path), description=str(row["caption"]))
