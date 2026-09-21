@@ -306,11 +306,48 @@ def make_caption(info: dict[str, Any], n: int, total: int, cfg: dict[str, Any]) 
     return "\\n\\n".join(lines)
 
 
+def _has_session_cookie(path: Path) -> bool:
+    try:
+        text = path.read_text("utf-8", errors="ignore")
+        names = {"sessionid", "sessionid_ss", "sid_tt"}
+        for line in text.splitlines():
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("\\t")
+            if len(parts) >= 7 and parts[5] in names:
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def get_accounts(cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    tc = cfg.get("tiktok", {})
     result = []
-    for i, item in enumerate(cfg.get("tiktok", {}).get("accounts", []), start=1):
+
+    if tc.get("auto_discover_cookies", True):
+        cookie_dir = pabs(str(tc.get("cookies_dir", "cookies")))
+        for i, cookie in enumerate(sorted(cookie_dir.glob("account*.txt")), start=1):
+            if not _has_session_cookie(cookie):
+                LOG.warning(
+                    "Cookies %s импортированы, но sessionid/sessionid_ss/sid_tt не найден",
+                    cookie.name,
+                )
+            result.append({
+                "name": cookie.stem,
+                "cookies": cookie,
+            })
+        if result:
+            return result
+
+    for i, item in enumerate(tc.get("accounts", []), start=1):
         cookie = pabs(str(item.get("cookies") or ""))
         if cookie.is_file():
+            if not _has_session_cookie(cookie):
+                LOG.warning(
+                    "Cookies %s не содержат sessionid/sessionid_ss/sid_tt",
+                    cookie.name,
+                )
             result.append({
                 "name": str(item.get("name") or f"account{i}"),
                 "cookies": cookie,
