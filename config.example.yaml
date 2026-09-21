@@ -33,12 +33,12 @@ ai:
   enabled: false
   provider: "gemini"
   api_key: ""
-  model: "gemini-2.5-flash"
+  model: "gemini-3.5-flash-lite"
 
 tiktok:
   upload_delay_seconds: 60
   headless: true
-  browser: "chrome"
+  browser: "chromium"
   account_strategy: "per_video" # per_video | per_part
   accounts:
     # Аккаунтов может быть сколько угодно.
