@@ -26,14 +26,18 @@
     bash install.sh
     nano config.yaml
 
-Добавьте любое число cookies-файлов, например:
+Импорт JSON/ZIP cookies:
 
-    cookies/main.txt
-    cookies/second.txt
-    cookies/third.txt
-    cookies/fourth.txt
+    python import_cookies.py /путь/cookies.zip
 
-И перечислите их в tiktok.accounts. Жёсткого ограничения на число аккаунтов в проекте нет.
+Импортёр принимает ZIP с любым числом JSON-профилей и создаёт
+`cookies/account001.txt`, `account002.txt` и т.д. TikToker автоматически
+подхватывает все эти файлы, поэтому перечислять каждый аккаунт в config.yaml
+не нужно. Жёсткого ограничения на число аккаунтов в проекте нет.
+
+Важно: для tiktok-uploader обычно нужен `sessionid`. Если его нет в конкретном
+JSON, импортёр сохранит файл, но покажет предупреждение о возможной невалидной
+авторизации.
 
 После настройки:
 
