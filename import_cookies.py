@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import json
+import re
 import sys
+import urllib.parse
 import zipfile
 from pathlib import Path
 
@@ -29,7 +31,7 @@ def expiry(c):
     return 2147483647
 
 
-def to_netscape(cookies):
+def json_to_netscape(cookies):
     lines = ["# Netscape HTTP Cookie File"]
     for c in cookies:
         name = str(c.get("name", "")).strip()
@@ -46,21 +48,71 @@ def to_netscape(cookies):
     return "\n".join(lines) + "\n"
 
 
-def auth_status(cookies):
-    names = {str(c.get("name", "")).strip() for c in cookies if isinstance(c, dict)}
+def parse_netscape(text):
+    rows = []
+    for line in text.splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) >= 7:
+            rows.append(parts[:7])
+    return rows
+
+
+def ensure_auth_cookie(text):
+    rows = parse_netscape(text)
+    names = {r[5] for r in rows}
+    if names & AUTH_NAMES:
+        return text, False
+
+    sid_guard = next((r[6] for r in rows if r[5] == "sid_guard"), "")
+    if not sid_guard:
+        return text, False
+
+    decoded = urllib.parse.unquote(sid_guard)
+    candidate = decoded.split("|", 1)[0].strip()
+    if not re.fullmatch(r"[0-9a-fA-F]{32}", candidate):
+        return text, False
+
+    # TikTok sid_guard commonly starts with the same 32-byte session token
+    # used by sessionid/sid_tt. This is a compatibility fallback for exports
+    # where HttpOnly sessionid was omitted.
+    extra = [
+        [".tiktok.com", "TRUE", "/", "TRUE", "2147483647", "sessionid", candidate],
+        [".tiktok.com", "TRUE", "/", "TRUE", "2147483647", "sessionid_ss", candidate],
+        [".tiktok.com", "TRUE", "/", "FALSE", "2147483647", "sid_tt", candidate],
+    ]
+
+    base = text.rstrip("\n")
+    if not base.startswith("# Netscape HTTP Cookie File"):
+        base = "# Netscape HTTP Cookie File\n" + base
+    base += "\n" + "\n".join("\t".join(r) for r in extra) + "\n"
+    return base, True
+
+
+def auth_status(text):
+    names = {r[5] for r in parse_netscape(text)}
     return sorted(names & AUTH_NAMES)
 
 
-def save_one(cookies, dest, source_name):
-    dest.write_text(to_netscape(cookies), encoding="utf-8")
-    found = auth_status(cookies)
+def save_text(text, dest, source_name):
+    fixed, derived = ensure_auth_cookie(text)
+    dest.write_text(fixed, encoding="utf-8")
+    found = auth_status(fixed)
+    suffix = " | sessionid восстановлен из sid_guard" if derived else ""
     if found:
-        print(f"[OK] {source_name} -> {dest} | auth: {', '.join(found)}")
+        print(f"[OK] {source_name} -> {dest} | auth: {', '.join(found)}{suffix}")
     else:
         print(
-            f"[WARN] {source_name} -> {dest} | нет sessionid/sessionid_ss/sid_tt; "
-            "файл импортирован, но TikTok-авторизация может не пройти"
+            f"[WARN] {source_name} -> {dest} | нет sessionid/sessionid_ss/sid_tt "
+            "и не удалось восстановить их из sid_guard"
         )
+    return bool(found), derived
+
+
+def import_json_bytes(raw):
+    data = json.loads(raw.decode("utf-8-sig"))
+    return json_to_netscape(cookie_list(data))
 
 
 def main():
@@ -72,38 +124,50 @@ def main():
     out = Path("cookies")
     out.mkdir(exist_ok=True)
 
-    # Не смешиваем новый импорт со старыми account*.txt.
     for old in out.glob("account*.txt"):
         old.unlink()
 
     imported = 0
-    warnings = 0
+    valid = 0
+    derived = 0
 
     if src.suffix.lower() == ".zip":
         with zipfile.ZipFile(src) as z:
-            names = sorted(n for n in z.namelist() if n.lower().endswith(".json"))
+            names = sorted(
+                n for n in z.namelist()
+                if n.lower().endswith((".json", ".txt"))
+            )
             if not names:
-                raise SystemExit("В ZIP нет JSON-файлов")
+                raise SystemExit("В ZIP нет JSON/TXT cookies-файлов")
 
             for i, name in enumerate(names, 1):
-                data = json.loads(z.read(name).decode("utf-8-sig"))
-                cookies = cookie_list(data)
+                raw = z.read(name)
+                if name.lower().endswith(".json"):
+                    text = import_json_bytes(raw)
+                else:
+                    text = raw.decode("utf-8-sig", errors="replace")
+
                 dest = out / f"account{i:03d}.txt"
-                save_one(cookies, dest, name)
+                ok, was_derived = save_text(text, dest, name)
                 imported += 1
-                if not auth_status(cookies):
-                    warnings += 1
+                valid += int(ok)
+                derived += int(was_derived)
     else:
-        data = json.loads(src.read_text(encoding="utf-8-sig"))
-        cookies = cookie_list(data)
+        raw = src.read_bytes()
+        if src.suffix.lower() == ".json":
+            text = import_json_bytes(raw)
+        else:
+            text = raw.decode("utf-8-sig", errors="replace")
         dest = out / "account001.txt"
-        save_one(cookies, dest, src.name)
+        ok, was_derived = save_text(text, dest, src.name)
         imported = 1
-        warnings = 0 if auth_status(cookies) else 1
+        valid = int(ok)
+        derived = int(was_derived)
 
     print()
     print(f"Импортировано аккаунтов: {imported}")
-    print(f"Без основной auth-cookie: {warnings}")
+    print(f"С auth-cookie после обработки: {valid}")
+    print(f"sessionid восстановлен из sid_guard: {derived}")
     print("TikToker автоматически найдёт все cookies/account*.txt.")
 
 
