@@ -1,28 +1,54 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+REPO_URL="https://github.com/ReVerfyx/TikToker.git"
+APP_DIR="/opt/TikToker"
+
 if [ "$(id -u)" -eq 0 ]; then
-  echo "Запусти без sudo: bash install.sh"
-  echo "Скрипт сам вызовет sudo только там, где это нужно."
-  exit 1
+  SUDO=""
+  APP_USER="$USER"
+else
+  SUDO="sudo"
+  APP_USER="$USER"
 fi
 
-APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP_USER="$USER"
+echo "=== TikToker: установка/обновление ==="
 
-sudo apt-get update
-sudo apt-get install -y python3 python3-venv python3-pip ffmpeg
-sudo apt-get install -y chromium-browser || sudo apt-get install -y chromium || true
+$SUDO apt-get update
+$SUDO apt-get install -y git curl python3 python3-venv python3-pip ffmpeg ca-certificates
 
-python3 -m venv "$APP_DIR/.venv"
-"$APP_DIR/.venv/bin/pip" install --upgrade pip wheel
-"$APP_DIR/.venv/bin/pip" install -r "$APP_DIR/requirements.txt"
-"$APP_DIR/.venv/bin/playwright" install chromium || true
+if [ -d "$APP_DIR/.git" ]; then
+  echo "Обновляю существующий репозиторий..."
+  $SUDO git -C "$APP_DIR" fetch origin main
+  $SUDO git -C "$APP_DIR" reset --hard origin/main
+else
+  echo "Клонирую TikToker..."
+  $SUDO rm -rf "$APP_DIR"
+  $SUDO git clone "$REPO_URL" "$APP_DIR"
+fi
 
-mkdir -p "$APP_DIR/cookies" "$APP_DIR/data/work"
-[ -f "$APP_DIR/config.yaml" ] || cp "$APP_DIR/config.example.yaml" "$APP_DIR/config.yaml"
+$SUDO chown -R "$APP_USER":"$APP_USER" "$APP_DIR"
+cd "$APP_DIR"
 
-cat <<EOF | sudo tee /etc/systemd/system/tiktoker.service >/dev/null
+if [ ! -d .venv ]; then
+  python3 -m venv .venv
+fi
+
+.venv/bin/python -m pip install --upgrade pip wheel
+.venv/bin/pip install -r requirements.txt
+.venv/bin/playwright install chromium
+
+mkdir -p cookies data/work logs
+chmod 700 cookies
+
+if [ ! -f config.yaml ]; then
+  cp config.example.yaml config.yaml
+fi
+
+USER_HOME="$(getent passwd "$APP_USER" | cut -d: -f6)"
+[ -n "$USER_HOME" ] || USER_HOME="/root"
+
+cat <<EOF | $SUDO tee /etc/systemd/system/tiktoker.service >/dev/null
 [Unit]
 Description=TikToker worker
 After=network-online.target
@@ -32,21 +58,57 @@ Wants=network-online.target
 Type=simple
 User=$APP_USER
 WorkingDirectory=$APP_DIR
+ExecStartPre=$APP_DIR/.venv/bin/python $APP_DIR/accounts.py refresh-if-stale 24
 ExecStart=$APP_DIR/.venv/bin/python $APP_DIR/main.py
 Restart=always
 RestartSec=10
 Environment=PYTHONUNBUFFERED=1
+Environment=HOME=$USER_HOME
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-sudo systemctl daemon-reload
-sudo systemctl enable tiktoker
+cat <<EOF | $SUDO tee /usr/local/bin/tiktoker-accounts >/dev/null
+#!/usr/bin/env bash
+cd "$APP_DIR"
+if [ "$#" -eq 0 ]; then
+  set -- show
+fi
+exec "$APP_DIR/.venv/bin/python" "$APP_DIR/accounts.py" "$@"
+EOF
+
+cat <<EOF | $SUDO tee /usr/local/bin/tiktoker-import >/dev/null
+#!/usr/bin/env bash
+cd "$APP_DIR"
+exec "$APP_DIR/.venv/bin/python" "$APP_DIR/import_cookies.py" "$@"
+EOF
+
+$SUDO chmod +x /usr/local/bin/tiktoker-accounts /usr/local/bin/tiktoker-import
+$SUDO systemctl daemon-reload
+$SUDO systemctl enable tiktoker
 
 echo
-echo "Готово."
-echo "1) nano $APP_DIR/config.yaml"
-echo "2) положи cookies-файлы в $APP_DIR/cookies/"
-echo "3) sudo systemctl start tiktoker"
-echo "4) journalctl -u tiktoker -f"
+echo "========================================"
+echo "TikToker установлен: $APP_DIR"
+echo "========================================"
+echo
+echo "Импорт ZIP:"
+echo "  tiktoker-import /путь/cookies.zip"
+echo
+echo "Проверить аккаунты и приватность:"
+echo "  tiktoker-accounts scan"
+echo
+echo "Посмотреть список @username:"
+echo "  tiktoker-accounts show"
+echo
+echo "Файлы списка:"
+echo "  $APP_DIR/data/accounts.txt"
+echo "  $APP_DIR/data/accounts.csv"
+echo
+echo "Настройка:"
+echo "  nano $APP_DIR/config.yaml"
+echo
+echo "Запуск:"
+echo "  sudo systemctl start tiktoker"
+echo "  journalctl -u tiktoker -f"
