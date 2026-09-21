@@ -1,61 +1,51 @@
 # TikToker
 
-Автоматический конвейер для разрешённых/лицензированных видео:
-
-1. Ищет новые ролики по YouTube-запросам и заданным каналам.
-2. Запоминает `video_id` в SQLite и не обрабатывает повторно.
-3. Скачивает через `yt-dlp`.
-4. Делит FFmpeg на части заданной длины.
-5. Генерирует русские подписи и хештеги; Gemini API опционален.
-6. Публикует части в TikTok через cookies.txt, используя `tiktok-uploader`.
-7. Поддерживает несколько TikTok-аккаунтов.
-8. После успешной публикации удаляет локальные части.
-9. Работает 24/7 через systemd.
+Автоматический конвейер для разрешённых/лицензированных видео: поиск YouTube, SQLite-защита от повторов, скачивание yt-dlp, нарезка FFmpeg, русские подписи/хештеги, очередь TikTok и удаление файлов после успешной публикации.
 
 > Используйте только собственные видео либо контент, на загрузку и повторную публикацию которого у вас есть разрешение.
 
+## Возможности
+
+- поиск одновременно по запросам и списку YouTube-каналов;
+- интервал поиска по умолчанию 1 час;
+- нарезка на части любой длины;
+- 9:16 с размытым фоном или оригинальное соотношение сторон;
+- SQLite хранит video_id и очередь после перезапуска;
+- TikTok через Netscape cookies.txt;
+- количество TikTok-аккаунтов не ограничено кодом: список читается из config.yaml;
+- распределение per_video или per_part;
+- задержка между публикациями настраивается, по умолчанию 60 секунд;
+- локальные хештеги без API;
+- опционально Gemini 3.5 Flash-Lite для русских описаний и хештегов;
+- systemd для 24/7 и автозапуска.
+
 ## Ubuntu 24.04
 
-```bash
-git clone https://github.com/ReVerfyx/TikToker.git
-cd TikToker
-sudo bash install.sh
-cp config.example.yaml config.yaml
-nano config.yaml
-```
+    git clone https://github.com/ReVerfyx/TikToker.git
+    cd TikToker
+    bash install.sh
+    nano config.yaml
 
-Положите cookies трёх аккаунтов:
+Добавьте любое число cookies-файлов, например:
 
-```text
-cookies/account1.txt
-cookies/account2.txt
-cookies/account3.txt
-```
+    cookies/main.txt
+    cookies/second.txt
+    cookies/third.txt
+    cookies/fourth.txt
 
-Формат cookies — Netscape cookies.txt.
+И перечислите их в tiktok.accounts. Жёсткого ограничения на число аккаунтов в проекте нет.
 
-Запуск вручную:
+После настройки:
 
-```bash
-source .venv/bin/activate
-python main.py
-```
+    sudo systemctl start tiktoker
+    sudo systemctl status tiktoker
+    journalctl -u tiktoker -f
 
-Автозапуск:
+Для запуска вручную:
 
-```bash
-sudo cp tiktoker.service /etc/systemd/system/tiktoker.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now tiktoker
-sudo systemctl status tiktoker
-```
+    source .venv/bin/activate
+    python main.py
 
-Логи:
+## Gemini
 
-```bash
-journalctl -u tiktoker -f
-```
-
-## Настройка
-
-Все основные параметры находятся в `config.yaml`: поисковые запросы, каналы, длина частей, интервал поиска, задержка между публикациями, cookies и Gemini API.
+Gemini необязателен. Без ключа бот строит хештеги локально. Для Gemini укажите api_key и ai.enabled: true. Ключ не коммитьте в GitHub: config.yaml находится в .gitignore.
