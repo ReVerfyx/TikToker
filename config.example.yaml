@@ -27,13 +27,11 @@ processing:
 captions:
   source_credit: true
   source_template: "Источник: YouTube — {channel}"
-  max_hashtags: 8
-
-ai:
-  enabled: false
-  provider: "gemini"
-  api_key: ""
-  model: "gemini-3.5-flash-lite"
+  required_hashtags:
+    - "fyp"
+    - "рек"
+    - "рекомендации"
+  max_auto_hashtags: 7
 
 tiktok:
   upload_delay_seconds: 60
