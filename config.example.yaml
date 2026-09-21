@@ -37,6 +37,12 @@ tiktok:
   # Автоматически подхватывает любое число cookies/account*.txt
   auto_discover_cookies: true
   cookies_dir: "cookies"
+
+  # Реестр создаёт accounts.py.
+  accounts_registry: "data/accounts.json"
+
+  # true = без свежей проверки приватности аккаунты не используются.
+  require_account_scan: true
   upload_delay_seconds: 60
   headless: true
   browser: "chromium"
