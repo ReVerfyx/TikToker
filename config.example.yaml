@@ -34,18 +34,15 @@ captions:
   max_auto_hashtags: 7
 
 tiktok:
+  # Автоматически подхватывает любое число cookies/account*.txt
+  auto_discover_cookies: true
+  cookies_dir: "cookies"
   upload_delay_seconds: 60
   headless: true
   browser: "chromium"
   account_strategy: "per_video" # per_video | per_part
-  accounts:
-    # Аккаунтов может быть сколько угодно.
-    - name: "account1"
-      cookies: "cookies/account1.txt"
-    - name: "account2"
-      cookies: "cookies/account2.txt"
-    - name: "account3"
-      cookies: "cookies/account3.txt"
+  accounts: []
+  # Если auto_discover_cookies: false, можно перечислить файлы вручную.
 
 storage:
   work_dir: "data/work"
