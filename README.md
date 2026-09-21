@@ -20,7 +20,7 @@ curl -fsSL https://raw.githubusercontent.com/ReVerfyx/TikToker/main/install.sh |
 tiktoker-import /root/cookies.zip
 ```
 
-Cookies сохраняются только на VPS в `/opt/TikToker/cookies/` и исключены из Git.
+Cookies сохраняются только на VPS в `/opt/TikToker/cookies/` и исключены из Git. Если имя файла в ZIP — числовой TikTok user ID, импортёр сохраняет его в имени локального файла вида `account_<user_id>.txt`, чтобы точнее сопоставлять профиль с `@username`.
 
 ## Список TikTok-аккаунтов
 
