@@ -1,0 +1,16 @@
+[Unit]
+Description=TikToker worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+WorkingDirectory=/opt/TikToker
+ExecStart=/opt/TikToker/.venv/bin/python /opt/TikToker/main.py
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
