@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import random
 import re
@@ -325,14 +326,37 @@ def get_accounts(cfg: dict[str, Any]) -> list[dict[str, Any]]:
     tc = cfg.get("tiktok", {})
     result = []
 
+    allowed_files = None
+    registry_path = pabs(str(tc.get("accounts_registry", "data/accounts.json")))
+    require_scan = bool(tc.get("require_account_scan", True))
+
+    if registry_path.is_file():
+        try:
+            registry = json.loads(registry_path.read_text("utf-8"))
+            allowed_files = {
+                str(row.get("cookie_file"))
+                for row in registry
+                if row.get("enabled") is True and row.get("status") == "public"
+            }
+            LOG.info(
+                "Реестр аккаунтов: разрешено публичных аккаунтов %s",
+                len(allowed_files),
+            )
+        except Exception as exc:
+            LOG.warning("Не удалось прочитать реестр аккаунтов: %s", exc)
+            if require_scan:
+                return []
+    elif require_scan:
+        LOG.warning(
+            "Нет data/accounts.json. Сначала запусти: tiktoker-accounts scan"
+        )
+        return []
+
     if tc.get("auto_discover_cookies", True):
         cookie_dir = pabs(str(tc.get("cookies_dir", "cookies")))
         for i, cookie in enumerate(sorted(cookie_dir.glob("account*.txt")), start=1):
-            if not _has_session_cookie(cookie):
-                LOG.warning(
-                    "Cookies %s импортированы, но sessionid/sessionid_ss/sid_tt не найден",
-                    cookie.name,
-                )
+            if allowed_files is not None and cookie.name not in allowed_files:
+                continue
             result.append({
                 "name": cookie.stem,
                 "cookies": cookie,
@@ -342,20 +366,17 @@ def get_accounts(cfg: dict[str, Any]) -> list[dict[str, Any]]:
 
     for i, item in enumerate(tc.get("accounts", []), start=1):
         cookie = pabs(str(item.get("cookies") or ""))
-        if cookie.is_file():
-            if not _has_session_cookie(cookie):
-                LOG.warning(
-                    "Cookies %s не содержат sessionid/sessionid_ss/sid_tt",
-                    cookie.name,
-                )
-            result.append({
-                "name": str(item.get("name") or f"account{i}"),
-                "cookies": cookie,
-            })
-        else:
+        if not cookie.is_file():
             LOG.warning("Нет cookies, аккаунт пропущен: %s", cookie)
-    return result
+            continue
+        if allowed_files is not None and cookie.name not in allowed_files:
+            continue
+        result.append({
+            "name": str(item.get("name") or f"account{i}"),
+            "cookies": cookie,
+        })
 
+    return result
 
 def assign_accounts(
     db: DB, all_accounts: list[dict[str, Any]], count: int, strategy: str
