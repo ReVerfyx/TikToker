@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import random
 import re
@@ -11,7 +10,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-import requests
 import yaml
 from tiktok_uploader.upload import TikTokUploader
 from yt_dlp import YoutubeDL
@@ -280,59 +278,23 @@ def local_tags(info: dict[str, Any], count: int) -> list[str]:
     return sorted(freq, key=lambda x: (-freq[x], len(x), x))[:count]
 
 
-def gemini(info: dict[str, Any], cfg: dict[str, Any]) -> tuple[str, list[str]] | None:
-    ai = cfg.get("ai", {})
-    if not ai.get("enabled") or ai.get("provider") != "gemini" or not ai.get("api_key"):
-        return None
-
-    model = str(ai.get("model", "gemini-3.5-flash-lite"))
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        + model + ":generateContent"
-    )
-    prompt = (
-        "Создай краткую русскую подпись и тематические хештеги для видео. "
-        "Верни только JSON вида "
-        + '{"caption":"текст","hashtags":["тег1","тег2"]}. '
-        + "Хештеги без #. Название: " + str(info.get("title") or "")
-        + "\\nКанал: " + str(info.get("channel") or info.get("uploader") or "")
-        + "\\nОписание: " + str(info.get("description") or "")[:2500]
-    )
-    try:
-        r = requests.post(
-            url,
-            headers={"x-goog-api-key": str(ai["api_key"])},
-            json={"contents": [{"parts": [{"text": prompt}]}]},
-            timeout=30,
-        )
-        r.raise_for_status()
-        txt = r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-        fence = chr(96) * 3
-        if txt.startswith(fence):
-            txt = txt.replace(fence + "json", "", 1).replace(fence, "").strip()
-        obj = json.loads(txt)
-        text = str(obj.get("caption") or "").strip()
-        tags = [
-            re.sub(r"[^0-9A-Za-zА-Яа-яЁё_]", "", str(x))
-            for x in obj.get("hashtags", [])
-        ]
-        return text, [x for x in tags if x]
-    except Exception as exc:
-        LOG.warning("Gemini недоступен: %s", exc)
-        return None
-
 
 def make_caption(info: dict[str, Any], n: int, total: int, cfg: dict[str, Any]) -> str:
     cc = cfg.get("captions", {})
-    max_tags = int(cc.get("max_hashtags", 8))
-    ai = gemini(info, cfg)
+    auto_count = int(cc.get("max_auto_hashtags", 7))
+    base = str(info.get("title") or "Видео").strip()
 
-    if ai:
-        base, tags = ai
-        tags = tags[:max_tags]
-    else:
-        base = str(info.get("title") or "Видео").strip()
-        tags = local_tags(info, max_tags)
+    required = cc.get(
+        "required_hashtags",
+        ["fyp", "рек", "рекомендации"],
+    )
+    auto = local_tags(info, auto_count)
+
+    tags: list[str] = []
+    for raw in [*required, *auto]:
+        tag = re.sub(r"[^0-9A-Za-zА-Яа-яЁё_]", "", str(raw).lstrip("#"))
+        if tag and tag.lower() not in {x.lower() for x in tags}:
+            tags.append(tag)
 
     lines = [base, f"Часть {n}/{total}"]
     if cc.get("source_credit", True):
