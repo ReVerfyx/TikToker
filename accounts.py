@@ -366,7 +366,13 @@ def scan() -> list[dict]:
         try:
             for index, path in enumerate(files, start=1):
                 print(f"[{index}/{len(files)}] {path.name}")
-                row = scan_one(browser, path, import_map.get(path.name, {}))
+                meta = dict(import_map.get(path.name, {}))
+                if not meta.get("source_user_id"):
+                    match = re.fullmatch(r"account_(\d+)", path.stem)
+                    if match:
+                        meta["source_user_id"] = match.group(1)
+                        meta["source_file"] = path.name
+                row = scan_one(browser, path, meta)
                 rows.append(row)
 
                 username = f"@{row['username']}" if row.get("username") else "-"
