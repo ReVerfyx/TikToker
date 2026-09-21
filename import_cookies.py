@@ -147,7 +147,11 @@ def main():
                 else:
                     text = raw.decode("utf-8-sig", errors="replace")
 
-                dest = out / f"account{i:03d}.txt"
+                source_stem = Path(name).stem
+                if source_stem.isdigit():
+                    dest = out / f"account_{source_stem}.txt"
+                else:
+                    dest = out / f"account{i:03d}.txt"
                 ok, was_derived = save_text(text, dest, name)
                 imported += 1
                 valid += int(ok)
