@@ -94,8 +94,14 @@ cd /opt/TikToker
 exec /opt/TikToker/.venv/bin/python /opt/TikToker/comment.py "$@"
 EOF
 
+cat <<'EOF' | $SUDO tee /usr/local/bin/tiktoker-verify >/dev/null
+#!/usr/bin/env bash
+cd /opt/TikToker
+exec /opt/TikToker/.venv/bin/python /opt/TikToker/manual_verify.py "$@"
+EOF
 
-$SUDO chmod +x /usr/local/bin/tiktoker-accounts /usr/local/bin/tiktoker-import /usr/local/bin/tiktoker-comment
+
+$SUDO chmod +x /usr/local/bin/tiktoker-accounts /usr/local/bin/tiktoker-import /usr/local/bin/tiktoker-comment /usr/local/bin/tiktoker-verify
 $SUDO systemctl daemon-reload
 $SUDO systemctl enable tiktoker
 
@@ -115,6 +121,9 @@ echo "  tiktoker-accounts show"
 echo
 echo "Комментарий по ссылке:"
 echo "  tiktoker-comment post --url 'https://www.tiktok.com/@user/video/...' --text 'Текст' --account '@username'"
+echo
+echo "Ручная CAPTCHA-проверка через RDP:"
+echo "  tiktoker-verify --account 3 --url 'https://www.tiktok.com/'"
 echo
 echo "История комментариев:"
 echo "  tiktoker-comment history"
