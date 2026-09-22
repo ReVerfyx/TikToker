@@ -14,6 +14,9 @@ from typing import Any
 import yaml
 from tiktok_uploader.upload import TikTokUploader
 from yt_dlp import YoutubeDL
+from youtube_mirrors import download as mirror_download
+from youtube_mirrors import search as mirror_search
+from youtube_mirrors import video_info as mirror_video_info
 
 ROOT = Path(__file__).resolve().parent
 LOG = logging.getLogger("tiktoker")
@@ -197,8 +200,19 @@ def discover(cfg: dict[str, Any], db: DB) -> dict[str, Any] | None:
     if mode in ("search", "both") and queries:
         q = random.choice(queries)
         LOG.info("Поиск: %s", q)
-        for e in flat_list(f"ytsearch{limit}:{q}", limit, cfg):
+
+        try:
+            direct_entries = flat_list(f"ytsearch{limit}:{q}", limit, cfg)
+        except Exception:
+            direct_entries = []
+
+        for e in direct_entries:
             urls.append(f"https://www.youtube.com/watch?v={e['id']}")
+
+        if not urls:
+            LOG.warning("Прямой поиск YouTube недоступен, пробую зеркала")
+            for video_id in mirror_search(q, limit, cfg):
+                urls.append(f"https://www.youtube.com/watch?v={video_id}")
 
     if mode in ("channels", "both") and channels:
         ch = random.choice(channels).rstrip("/")
@@ -210,24 +224,58 @@ def discover(cfg: dict[str, Any], db: DB) -> dict[str, Any] | None:
     min_d = int(yc.get("min_duration_seconds", 0))
     max_d = int(yc.get("max_duration_seconds", 999999999))
 
+    direct_metadata_blocked = False
+
     for url in urls:
         vid = url.rsplit("=", 1)[-1]
         if db.seen(vid):
             continue
-        try:
-            info = ydl_info(url, cfg)
+
+        info = None
+
+        if not direct_metadata_blocked:
+            try:
+                info = ydl_info(url, cfg)
+            except Exception:
+                info = None
+
+            if not info:
+                direct_metadata_blocked = True
+                LOG.warning(
+                    "Прямой YouTube не отдаёт метаданные. "
+                    "Переключаю этот цикл на Invidious/Piped."
+                )
+
+        if not info:
+            info = mirror_video_info(vid, cfg)
+
+        if not info:
+            continue
+
+        duration = int(info.get("duration") or 0)
+        if min_d <= duration <= max_d:
+            return info
+
+    if not urls and mode in ("search", "both") and queries:
+        q = random.choice(queries)
+        for vid in mirror_search(q, limit, cfg):
+            if db.seen(vid):
+                continue
+            info = mirror_video_info(vid, cfg)
             if not info:
                 continue
             duration = int(info.get("duration") or 0)
             if min_d <= duration <= max_d:
                 return info
-        except Exception:
-            LOG.exception("Ошибка чтения %s", url)
+
     return None
 
 
 def download(info: dict[str, Any], work: Path, cfg: dict[str, Any]) -> Path:
     work.mkdir(parents=True, exist_ok=True)
+
+    if info.get("_mirror_provider"):
+        return mirror_download(info, work, cfg)
 
     command = [
         str(ROOT / ".venv" / "bin" / "yt-dlp"),
@@ -249,10 +297,23 @@ def download(info: dict[str, Any], work: Path, cfg: dict[str, Any]) -> Path:
         info.get("webpage_url") or f"https://www.youtube.com/watch?v={info['id']}"
     )
 
-    subprocess.run(command, check=True)
+    try:
+        subprocess.run(command, check=True)
+    except subprocess.CalledProcessError as exc:
+        LOG.warning(
+            "Прямая загрузка YouTube не удалась, пробую зеркала: %s",
+            exc,
+        )
+        mirror_info = mirror_video_info(str(info["id"]), cfg)
+        if mirror_info:
+            return mirror_download(mirror_info, work, cfg)
+        raise
 
     files = sorted(work.glob("source.*"))
     if not files:
+        mirror_info = mirror_video_info(str(info["id"]), cfg)
+        if mirror_info:
+            return mirror_download(mirror_info, work, cfg)
         raise RuntimeError("Исходный файл не найден после yt-dlp")
     return files[0]
 
