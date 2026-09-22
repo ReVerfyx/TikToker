@@ -157,6 +157,55 @@ def write_history(
         )
 
 
+def resolve_accounts_list(value: str) -> list[dict]:
+    parts = [x.strip() for x in value.split(",") if x.strip()]
+    if not parts:
+        raise SystemExit("Не указаны аккаунты.")
+
+    result = []
+    seen = set()
+
+    for part in parts:
+        row = resolve_account(part)
+        key = str(row.get("cookie_file") or row.get("username") or part)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(row)
+
+    return result
+
+
+def preview_commands(url: str, text: str, accounts_value: str) -> None:
+    if "tiktok.com/" not in url.lower():
+        raise SystemExit("Нужна ссылка на TikTok-видео.")
+
+    text = text.strip()
+    if not text:
+        raise SystemExit("Комментарий пустой.")
+
+    accounts = resolve_accounts_list(accounts_value)
+
+    print(f"Выбрано аккаунтов: {len(accounts)}")
+    print()
+
+    for i, row in enumerate(accounts, start=1):
+        username = str(row.get("username") or "").strip()
+        account_arg = f"@{username}" if username else str(row.get("cookie_file") or "")
+        safe_url = url.replace("'", "'"'"'")
+        safe_text = text.replace("'", "'"'"'")
+        safe_account = account_arg.replace("'", "'"'"'")
+
+        print(f"{i}. {account_arg}")
+        print(
+            "tiktoker-comment post "
+            f"--url '{safe_url}' "
+            f"--text '{safe_text}' "
+            f"--account '{safe_account}'"
+        )
+        print()
+
+
 def post_comment(url: str, text: str, account_name: str) -> None:
     if "tiktok.com/" not in url.lower():
         raise SystemExit("Нужна ссылка на TikTok-видео.")
@@ -282,6 +331,15 @@ def main() -> None:
     post.add_argument("--text", required=True)
     post.add_argument("--account", required=True)
 
+    preview = sub.add_parser("preview")
+    preview.add_argument("--url", required=True)
+    preview.add_argument("--text", required=True)
+    preview.add_argument(
+        "--accounts",
+        required=True,
+        help="Номера или имена через запятую, например: 1,2,3 или @user1,@user2",
+    )
+
     history = sub.add_parser("history")
     history.add_argument("--limit", type=int, default=20)
 
@@ -289,6 +347,10 @@ def main() -> None:
 
     if args.command == "post":
         post_comment(args.url, args.text, args.account)
+        return
+
+    if args.command == "preview":
+        preview_commands(args.url, args.text, args.accounts)
         return
 
     if args.command == "history":
