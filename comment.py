@@ -273,6 +273,12 @@ def captcha_detected(page) -> bool:
         "verify you are human",
         "подтвердите, что вы человек",
         "проверка безопасности",
+        "передвиньте ползунок",
+        "совместить пазл",
+        "перетащите ползунок",
+        "slide the puzzle",
+        "drag the slider",
+        "rotate the image",
     ]
     return any(word in body for word in words)
 
@@ -845,12 +851,28 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                     post.click(timeout=5000, force=True)
 
                 print(
-                    "  Клик выполнен. Жду реальный ответ TikTok на отправку...",
+                    "  Клик выполнен. Проверяю ответ TikTok и CAPTCHA...",
                     flush=True,
                 )
-                page.wait_for_timeout(4000)
+
+                captcha_after_post = False
+                for _ in range(12):
+                    page.wait_for_timeout(500)
+                    if captcha_detected(page):
+                        captcha_after_post = True
+                        break
 
                 save_screenshot(page, account, "after_post_click")
+
+                if captcha_after_post:
+                    save_screenshot(page, account, "captcha_after_post")
+                    print(
+                        "  CAPTCHA ПОСЛЕ ОТПРАВКИ: TikTok показал проверку с пазлом.",
+                        flush=True,
+                    )
+                    raise RuntimeError(
+                        "CAPTCHA detected after post click; comment is NOT confirmed"
+                    )
                 print(
                     "[DEBUG] Скриншоты лежат в: "
                     f"{SCREENSHOT_DIR}",
@@ -894,6 +916,20 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                     raise RuntimeError(
                         "Отправка НЕ подтверждена: после клика нет успешного "
                         "POST-ответа TikTok для комментария."
+                    )
+
+                if field_after not in {"", "<поле исчезло>"} and text in field_after:
+                    raise RuntimeError(
+                        "Отправка НЕ подтверждена: TikTok ответил на запрос, "
+                        "но текст остался в поле ввода."
+                    )
+
+                # Последняя проверка прямо перед sent: CAPTCHA могла появиться с задержкой.
+                if captcha_detected(page):
+                    save_screenshot(page, account, "captcha_late")
+                    raise RuntimeError(
+                        "CAPTCHA detected before success confirmation; "
+                        "comment is NOT confirmed"
                     )
 
                 print("Комментарий отправлен и подтвержден TikTok.", flush=True)
