@@ -141,25 +141,47 @@ class DB:
         self.db.commit()
 
 
-def ydl_info(url: str) -> dict[str, Any] | None:
-    with YoutubeDL({
+def youtube_cookie_path(cfg: dict[str, Any]) -> Path | None:
+    raw = str(cfg.get("youtube", {}).get("cookies_file", "youtube_cookies.txt") or "").strip()
+    if not raw:
+        return None
+    path = pabs(raw)
+    return path if path.is_file() else None
+
+
+def ydl_options(cfg: dict[str, Any]) -> dict[str, Any]:
+    opts: dict[str, Any] = {
         "quiet": True,
         "no_warnings": True,
         "ignoreerrors": True,
-        "noplaylist": True,
-    }) as ydl:
+    }
+
+    cookie = youtube_cookie_path(cfg)
+    if cookie:
+        opts["cookiefile"] = str(cookie)
+
+    sleep_requests = float(cfg.get("youtube", {}).get("sleep_requests", 2) or 0)
+    if sleep_requests > 0:
+        opts["sleep_interval_requests"] = sleep_requests
+
+    return opts
+
+
+def ydl_info(url: str, cfg: dict[str, Any]) -> dict[str, Any] | None:
+    opts = ydl_options(cfg)
+    opts["noplaylist"] = True
+    with YoutubeDL(opts) as ydl:
         return ydl.extract_info(url, download=False)
 
 
-def flat_list(url: str, limit: int) -> list[dict[str, Any]]:
-    with YoutubeDL({
-        "quiet": True,
-        "no_warnings": True,
-        "ignoreerrors": True,
-        "extract_flat": True,
-        "playlistend": limit,
-    }) as ydl:
+def flat_list(url: str, limit: int, cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    opts = ydl_options(cfg)
+    opts["extract_flat"] = True
+    opts["playlistend"] = limit
+
+    with YoutubeDL(opts) as ydl:
         data = ydl.extract_info(url, download=False) or {}
+
     entries = data.get("entries") or []
     return [e for e in entries if e and e.get("id")]
 
@@ -175,13 +197,13 @@ def discover(cfg: dict[str, Any], db: DB) -> dict[str, Any] | None:
     if mode in ("search", "both") and queries:
         q = random.choice(queries)
         LOG.info("Поиск: %s", q)
-        for e in flat_list(f"ytsearch{limit}:{q}", limit):
+        for e in flat_list(f"ytsearch{limit}:{q}", limit, cfg):
             urls.append(f"https://www.youtube.com/watch?v={e['id']}")
 
     if mode in ("channels", "both") and channels:
         ch = random.choice(channels).rstrip("/")
         LOG.info("Канал: %s", ch)
-        for e in flat_list(ch + "/videos", limit):
+        for e in flat_list(ch + "/videos", limit, cfg):
             urls.append(f"https://www.youtube.com/watch?v={e['id']}")
 
     random.shuffle(urls)
@@ -193,7 +215,7 @@ def discover(cfg: dict[str, Any], db: DB) -> dict[str, Any] | None:
         if db.seen(vid):
             continue
         try:
-            info = ydl_info(url)
+            info = ydl_info(url, cfg)
             if not info:
                 continue
             duration = int(info.get("duration") or 0)
@@ -204,15 +226,31 @@ def discover(cfg: dict[str, Any], db: DB) -> dict[str, Any] | None:
     return None
 
 
-def download(info: dict[str, Any], work: Path) -> Path:
+def download(info: dict[str, Any], work: Path, cfg: dict[str, Any]) -> Path:
     work.mkdir(parents=True, exist_ok=True)
-    subprocess.run([
-        "yt-dlp", "--no-playlist",
+
+    command = [
+        str(ROOT / ".venv" / "bin" / "yt-dlp"),
+        "--no-playlist",
         "--merge-output-format", "mp4",
         "-f", "bv*+ba/b",
         "-o", str(work / "source.%(ext)s"),
-        info.get("webpage_url") or f"https://www.youtube.com/watch?v={info['id']}",
-    ], check=True)
+    ]
+
+    cookie = youtube_cookie_path(cfg)
+    if cookie:
+        command += ["--cookies", str(cookie)]
+
+    sleep_requests = float(cfg.get("youtube", {}).get("sleep_requests", 2) or 0)
+    if sleep_requests > 0:
+        command += ["--sleep-requests", str(sleep_requests)]
+
+    command.append(
+        info.get("webpage_url") or f"https://www.youtube.com/watch?v={info['id']}"
+    )
+
+    subprocess.run(command, check=True)
+
     files = sorted(work.glob("source.*"))
     if not files:
         raise RuntimeError("Исходный файл не найден после yt-dlp")
@@ -398,7 +436,7 @@ def assign_accounts(
 def queue_video(info: dict[str, Any], cfg: dict[str, Any], db: DB) -> None:
     vid = info["id"]
     folder = pabs(cfg["storage"]["work_dir"]) / vid
-    source = download(info, folder)
+    source = download(info, folder, cfg)
     db.video_status(vid, "splitting")
 
     parts = cut(source, folder / "parts", cfg)
