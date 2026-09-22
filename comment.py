@@ -242,6 +242,13 @@ def page_diagnostics(page) -> None:
 
 def dismiss_overlays(page) -> None:
     selectors = [
+        # Актуальный русский cookie-баннер TikTok
+        'button:has-text("Разрешить все")',
+        'button:has-text("Отклонить использование дополнительных файлов cookie")',
+        'tiktok-cookie-banner button:has-text("Разрешить все")',
+        'tiktok-cookie-banner button:has-text("Отклонить использование дополнительных файлов cookie")',
+
+        # Английские/старые варианты
         'tiktok-cookie-banner button:has-text("Accept all")',
         'tiktok-cookie-banner button:has-text("Accept")',
         'tiktok-cookie-banner button:has-text("Принять все")',
@@ -250,6 +257,8 @@ def dismiss_overlays(page) -> None:
         'button:has-text("Accept")',
         'button:has-text("Принять все")',
         'button:has-text("Принять")',
+
+        # Типовые модалки TikTok
         '[data-e2e="modal-close-inner-button"]',
         'button[aria-label="Close"]',
         'button[aria-label="Закрыть"]',
@@ -258,20 +267,43 @@ def dismiss_overlays(page) -> None:
     for selector in selectors:
         try:
             loc = page.locator(selector).first
-            if loc.count() and loc.is_visible(timeout=700):
+            if loc.count() and loc.is_visible(timeout=900):
                 print(f"  Закрываю overlay: {selector}", flush=True)
-                loc.click(timeout=2500, force=True)
-                page.wait_for_timeout(350)
+                loc.click(timeout=3000, force=True)
+                page.wait_for_timeout(500)
         except Exception:
             continue
 
-    # TikTok иногда оставляет custom-element cookie banner поверх страницы
-    # даже когда обычные кнопки не находятся. Не удаляем данные/куки:
-    # только запрещаем баннеру перехватывать указатель.
+    # Иногда белая модалка TikTok имеет только маленький X без data-e2e.
+    # Ищем видимую кнопку-крестик в центральном диалоге.
+    generic_close = [
+        '[role="dialog"] button:has-text("×")',
+        '[role="dialog"] button:has-text("✕")',
+        '[role="dialog"] button:has-text("✖")',
+        'div[role="dialog"] button',
+    ]
+    for selector in generic_close:
+        try:
+            loc = page.locator(selector).first
+            if loc.count() and loc.is_visible(timeout=700):
+                aria = (loc.get_attribute("aria-label") or "").lower()
+                txt = (loc.inner_text(timeout=500) or "").strip()
+                if (
+                    "close" in aria
+                    or "закры" in aria
+                    or txt in {"×", "✕", "✖", "x", "X"}
+                ):
+                    print(f"  Закрываю центральную модалку: {selector}", flush=True)
+                    loc.click(timeout=2500, force=True)
+                    page.wait_for_timeout(500)
+                    break
+        except Exception:
+            continue
+
+    # Последний fallback: не даём cookie custom-element перехватывать указатель.
     try:
         banner = page.locator("tiktok-cookie-banner").first
         if banner.count():
-            print("  Отключаю перехват кликов cookie-баннером.", flush=True)
             banner.evaluate(
                 """el => {
                     el.style.pointerEvents = 'none';
@@ -279,10 +311,10 @@ def dismiss_overlays(page) -> None:
                     el.setAttribute('aria-hidden', 'true');
                 }"""
             )
+            print("  Cookie-баннер больше не перехватывает клики.", flush=True)
             page.wait_for_timeout(200)
     except Exception:
         pass
-
 
 def try_open_comments(page) -> None:
     print("  Проверяю, нужно ли открыть панель комментариев...", flush=True)
