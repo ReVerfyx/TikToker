@@ -618,25 +618,62 @@ def post_comment(url: str, text: str, account_name: str) -> None:
 
                 print("[6/7] Ввожу текст...", flush=True)
                 box.click(force=True, timeout=7000)
-                page.wait_for_timeout(300)
+                page.wait_for_timeout(250)
 
+                # TikTok использует React contenteditable. fill() иногда меняет DOM,
+                # но не генерирует нужные input-события, из-за чего кнопка остаётся disabled.
                 try:
-                    box.fill(text, timeout=7000)
-                except Exception:
                     page.keyboard.press("Control+A")
                     page.keyboard.press("Backspace")
-                    page.keyboard.insert_text(text)
+                except Exception:
+                    pass
 
-                page.wait_for_timeout(500)
+                page.keyboard.insert_text(text)
+                page.wait_for_timeout(900)
+
+                try:
+                    current_text = (box.inner_text(timeout=2000) or "").strip()
+                except Exception:
+                    current_text = ""
+
+                print(f"  Текст в поле: {current_text!r}", flush=True)
+
+                if text not in current_text:
+                    print(
+                        "  Первый ввод не зарегистрировался, пробую через JS events.",
+                        flush=True,
+                    )
+                    box.evaluate(
+                        """(el, value) => {
+                            el.focus();
+                            el.textContent = value;
+                            el.dispatchEvent(new InputEvent('input', {
+                                bubbles: true,
+                                inputType: 'insertText',
+                                data: value
+                            }));
+                            el.dispatchEvent(new Event('change', {bubbles: true}));
+                        }""",
+                        text,
+                    )
+                    page.wait_for_timeout(900)
 
                 print("[7/7] Ищу кнопку отправки...", flush=True)
                 post = first_visible(page, POST_BUTTON_SELECTORS, timeout_ms=7000)
 
-                disabled = post.get_attribute("aria-disabled")
-                if disabled == "true":
+                aria_disabled = post.get_attribute("aria-disabled")
+                native_disabled = post.is_disabled()
+
+                if aria_disabled == "true" or native_disabled:
+                    try:
+                        field_text = (box.inner_text(timeout=2000) or "").strip()
+                    except Exception:
+                        field_text = ""
+
                     raise RuntimeError(
-                        "Кнопка публикации недоступна. "
-                        "Возможно, комментарии отключены."
+                        "Кнопка публикации осталась disabled после ввода. "
+                        f"Текст в поле={field_text!r}. "
+                        "TikTok не принял событие ввода."
                     )
 
                 dismiss_overlays(page)
