@@ -240,7 +240,48 @@ def page_diagnostics(page) -> None:
     )
 
 
+def captcha_detected(page) -> bool:
+    selectors = [
+        'iframe[src*="captcha" i]',
+        '[class*="captcha" i]',
+        '[id*="captcha" i]',
+        '[data-e2e*="captcha" i]',
+        '[role="dialog"] iframe',
+    ]
+
+    for selector in selectors:
+        try:
+            loc = page.locator(selector)
+            if loc.count() > 0:
+                for i in range(min(loc.count(), 5)):
+                    try:
+                        if loc.nth(i).is_visible(timeout=500):
+                            return True
+                    except Exception:
+                        continue
+        except Exception:
+            continue
+
+    try:
+        body = (page.locator("body").inner_text(timeout=1500) or "").lower()
+    except Exception:
+        body = ""
+
+    words = [
+        "captcha",
+        "verify to continue",
+        "verify you are human",
+        "подтвердите, что вы человек",
+        "проверка безопасности",
+    ]
+    return any(word in body for word in words)
+
+
 def dismiss_overlays(page) -> None:
+    if captcha_detected(page):
+        print("  CAPTCHA обнаружена — overlay не закрываю.", flush=True)
+        return
+
     selectors = [
         # Актуальный русский cookie-баннер TikTok
         'button:has-text("Разрешить все")',
@@ -677,6 +718,10 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                         "TikTok отправил на страницу входа: cookies недействительны."
                     )
 
+                if captcha_detected(page):
+                    save_screenshot(page, account, "captcha_before_comments")
+                    raise RuntimeError("CAPTCHA detected before comments")
+
                 print("[5/7] Открываю комментарии и ищу поле...", flush=True)
                 try:
                     page.mouse.wheel(0, 900)
@@ -779,6 +824,10 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                         f"Текст в поле={field_text!r}. "
                         "TikTok не принял событие ввода."
                     )
+
+                if captcha_detected(page):
+                    save_screenshot(page, account, "captcha_before_post")
+                    raise RuntimeError("CAPTCHA detected before post")
 
                 dismiss_overlays(page)
                 save_screenshot(page, account, "before_post_click")
