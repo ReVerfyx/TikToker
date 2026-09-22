@@ -88,7 +88,14 @@ cd /opt/TikToker
 exec /opt/TikToker/.venv/bin/python /opt/TikToker/import_cookies.py "$@"
 EOF
 
-$SUDO chmod +x /usr/local/bin/tiktoker-accounts /usr/local/bin/tiktoker-import
+cat <<'EOF' | $SUDO tee /usr/local/bin/tiktoker-comment >/dev/null
+#!/usr/bin/env bash
+cd /opt/TikToker
+exec /opt/TikToker/.venv/bin/python /opt/TikToker/comment.py "$@"
+EOF
+
+
+$SUDO chmod +x /usr/local/bin/tiktoker-accounts /usr/local/bin/tiktoker-import /usr/local/bin/tiktoker-comment
 $SUDO systemctl daemon-reload
 $SUDO systemctl enable tiktoker
 
@@ -105,6 +112,12 @@ echo "  tiktoker-accounts scan"
 echo
 echo "Посмотреть список @username:"
 echo "  tiktoker-accounts show"
+echo
+echo "Комментарий по ссылке:"
+echo "  tiktoker-comment post --url 'https://www.tiktok.com/@user/video/...' --text 'Текст' --account '@username'"
+echo
+echo "История комментариев:"
+echo "  tiktoker-comment history"
 echo
 echo "Файлы списка:"
 echo "  $APP_DIR/data/accounts.txt"
