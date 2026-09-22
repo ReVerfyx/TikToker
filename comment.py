@@ -241,6 +241,10 @@ def page_diagnostics(page) -> None:
 
 def dismiss_overlays(page) -> None:
     selectors = [
+        'tiktok-cookie-banner button:has-text("Accept all")',
+        'tiktok-cookie-banner button:has-text("Accept")',
+        'tiktok-cookie-banner button:has-text("Принять все")',
+        'tiktok-cookie-banner button:has-text("Принять")',
         'button:has-text("Accept all")',
         'button:has-text("Accept")',
         'button:has-text("Принять все")',
@@ -254,10 +258,29 @@ def dismiss_overlays(page) -> None:
         try:
             loc = page.locator(selector).first
             if loc.count() and loc.is_visible(timeout=700):
-                loc.click(timeout=2000)
-                page.wait_for_timeout(300)
+                print(f"  Закрываю overlay: {selector}", flush=True)
+                loc.click(timeout=2500, force=True)
+                page.wait_for_timeout(350)
         except Exception:
             continue
+
+    # TikTok иногда оставляет custom-element cookie banner поверх страницы
+    # даже когда обычные кнопки не находятся. Не удаляем данные/куки:
+    # только запрещаем баннеру перехватывать указатель.
+    try:
+        banner = page.locator("tiktok-cookie-banner").first
+        if banner.count():
+            print("  Отключаю перехват кликов cookie-баннером.", flush=True)
+            banner.evaluate(
+                """el => {
+                    el.style.pointerEvents = 'none';
+                    el.style.zIndex = '-1';
+                    el.setAttribute('aria-hidden', 'true');
+                }"""
+            )
+            page.wait_for_timeout(200)
+    except Exception:
+        pass
 
 
 def try_open_comments(page) -> None:
@@ -616,7 +639,18 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                         "Возможно, комментарии отключены."
                     )
 
-                post.click(timeout=7000)
+                dismiss_overlays(page)
+
+                try:
+                    post.click(timeout=5000)
+                except PlaywrightTimeoutError:
+                    print(
+                        "  Обычный клик заблокирован overlay — пробую force click.",
+                        flush=True,
+                    )
+                    dismiss_overlays(page)
+                    post.click(timeout=5000, force=True)
+
                 page.wait_for_timeout(2000)
 
                 if "/login" in page.url.lower():
