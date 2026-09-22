@@ -18,15 +18,28 @@ ROOT = Path(__file__).resolve().parent
 REGISTRY = ROOT / "data" / "accounts.json"
 HISTORY = ROOT / "data" / "comments.csv"
 
+COMMENT_OPEN_SELECTORS = [
+    'button:has([data-e2e="comment-icon"])',
+    'button:has([data-e2e="browse-comment-icon"])',
+    '[data-e2e="browse-comment"]',
+    'button[aria-label*="comment" i]',
+    'button[aria-label*="коммент" i]',
+]
+
 COMMENT_BOX_SELECTORS = [
     '[data-e2e="comment-input"] [contenteditable="true"]',
     'div[data-e2e="comment-input"][contenteditable="true"]',
+    '[data-e2e="comment-input"][contenteditable="true"]',
+    'div[contenteditable="true"][role="textbox"]',
     '[contenteditable="true"][role="textbox"]',
+    'div[contenteditable="true"]',
 ]
 
 POST_BUTTON_SELECTORS = [
     '[data-e2e="comment-post"][aria-disabled="false"]',
     'button[data-e2e="comment-post"]',
+    'div[data-e2e="comment-post"]',
+    '[data-e2e="comment-post"]',
 ]
 
 
@@ -100,6 +113,27 @@ def resolve_account(value: str) -> dict:
     row = dict(row)
     row["cookie_path"] = cookie_path
     return row
+
+
+def try_open_comments(page) -> None:
+    print("  Проверяю, нужно ли открыть панель комментариев...", flush=True)
+
+    for selector in COMMENT_OPEN_SELECTORS:
+        try:
+            locator = page.locator(selector).first
+            if locator.count() < 1:
+                continue
+            if not locator.is_visible(timeout=1500):
+                continue
+
+            print(f"  Открываю комментарии: {selector}", flush=True)
+            locator.click(timeout=5000)
+            page.wait_for_timeout(1200)
+            return
+        except Exception:
+            continue
+
+    print("  Отдельная кнопка комментариев не найдена, ищу поле сразу.", flush=True)
 
 
 def first_visible(page, selectors: list[str], timeout_ms: int = 7000):
@@ -318,8 +352,9 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                         "TikTok отправил на страницу входа: cookies недействительны."
                     )
 
-                print("[5/7] Ищу поле комментария...", flush=True)
-                box = first_visible(page, COMMENT_BOX_SELECTORS, timeout_ms=7000)
+                print("[5/7] Открываю комментарии и ищу поле...", flush=True)
+                try_open_comments(page)
+                box = first_visible(page, COMMENT_BOX_SELECTORS, timeout_ms=5000)
 
                 print("[6/7] Ввожу текст...", flush=True)
                 box.click(force=True, timeout=7000)
