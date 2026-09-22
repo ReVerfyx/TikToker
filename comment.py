@@ -115,6 +115,54 @@ def resolve_account(value: str) -> dict:
     return row
 
 
+def auth_diagnostics(page) -> None:
+    checks = {
+        "login_button": [
+            '[data-e2e="top-login-button"]',
+            'button:has-text("Log in")',
+            'button:has-text("Войти")',
+        ],
+        "logged_ui": [
+            '[data-e2e="profile-icon"]',
+            '[data-e2e="inbox-icon"]',
+            '[data-e2e="nav-profile"]',
+            'a[href*="/messages"]',
+        ],
+    }
+
+    values = {}
+    for name, selectors in checks.items():
+        found = 0
+        for selector in selectors:
+            try:
+                found += page.locator(selector).count()
+            except Exception:
+                continue
+        values[name] = found
+
+    print(
+        "  Авторизация UI: "
+        f"login_button={values['login_button']} | "
+        f"logged_ui={values['logged_ui']}",
+        flush=True,
+    )
+
+
+def print_comment_network(events: list[tuple[int, str]]) -> None:
+    if not events:
+        print("  Сеть комментариев: подходящих запросов не замечено.", flush=True)
+        return
+
+    print("  Сеть комментариев:", flush=True)
+    seen = set()
+    for status, path in events[-12:]:
+        key = (status, path)
+        if key in seen:
+            continue
+        seen.add(key)
+        print(f"    HTTP {status} {path}", flush=True)
+
+
 def page_diagnostics(page) -> None:
     try:
         body = page.locator("body").inner_text(timeout=3000).lower()
@@ -391,6 +439,20 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                 context.add_cookies(cookies)
                 page = context.new_page()
 
+                comment_network = []
+
+                def _capture_response(response):
+                    try:
+                        from urllib.parse import urlsplit
+                        u = urlsplit(response.url)
+                        path = u.path.lower()
+                        if "comment" in path or "/api/" in path and "comment" in response.url.lower():
+                            comment_network.append((response.status, f"{u.scheme}://{u.netloc}{u.path}"))
+                    except Exception:
+                        pass
+
+                page.on("response", _capture_response)
+
                 print("[4/7] Открываю видео...", flush=True)
                 try:
                     page.goto(
@@ -405,6 +467,8 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                 print(f"  Итоговый URL: {page.url}", flush=True)
                 dismiss_overlays(page)
                 page_diagnostics(page)
+                auth_diagnostics(page)
+                print_comment_network(comment_network)
 
                 if "/login" in page.url.lower():
                     raise RuntimeError(
@@ -421,6 +485,8 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                 dismiss_overlays(page)
                 try_open_comments(page)
                 page_diagnostics(page)
+                auth_diagnostics(page)
+                print_comment_network(comment_network)
 
                 try:
                     box = first_visible(page, COMMENT_BOX_SELECTORS, timeout_ms=3000)
