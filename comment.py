@@ -115,6 +115,63 @@ def resolve_account(value: str) -> dict:
     return row
 
 
+def page_diagnostics(page) -> None:
+    try:
+        body = page.locator("body").inner_text(timeout=3000).lower()
+    except Exception:
+        body = ""
+
+    flags = []
+    checks = [
+        ("login", ("log in", "sign in", "войти")),
+        ("captcha", ("captcha", "verify to continue", "подтвердите")),
+        ("comments_off", ("comments are turned off", "комментарии отключены")),
+        ("comments", ("comments", "комментарии")),
+    ]
+
+    for name, needles in checks:
+        if any(x in body for x in needles):
+            flags.append(name)
+
+    try:
+        editable_count = page.locator('[contenteditable="true"]').count()
+    except Exception:
+        editable_count = -1
+
+    try:
+        textarea_count = page.locator("textarea").count()
+    except Exception:
+        textarea_count = -1
+
+    print(
+        "  Диагностика DOM: "
+        f"flags={','.join(flags) if flags else 'none'} | "
+        f"contenteditable={editable_count} | textarea={textarea_count}",
+        flush=True,
+    )
+
+
+def dismiss_overlays(page) -> None:
+    selectors = [
+        'button:has-text("Accept all")',
+        'button:has-text("Accept")',
+        'button:has-text("Принять все")',
+        'button:has-text("Принять")',
+        '[data-e2e="modal-close-inner-button"]',
+        'button[aria-label="Close"]',
+        'button[aria-label="Закрыть"]',
+    ]
+
+    for selector in selectors:
+        try:
+            loc = page.locator(selector).first
+            if loc.count() and loc.is_visible(timeout=700):
+                loc.click(timeout=2000)
+                page.wait_for_timeout(300)
+        except Exception:
+            continue
+
+
 def try_open_comments(page) -> None:
     print("  Проверяю, нужно ли открыть панель комментариев...", flush=True)
 
@@ -346,6 +403,8 @@ def post_comment(url: str, text: str, account_name: str) -> None:
 
                 page.wait_for_timeout(1500)
                 print(f"  Итоговый URL: {page.url}", flush=True)
+                dismiss_overlays(page)
+                page_diagnostics(page)
 
                 if "/login" in page.url.lower():
                     raise RuntimeError(
@@ -353,8 +412,30 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                     )
 
                 print("[5/7] Открываю комментарии и ищу поле...", flush=True)
+                try:
+                    page.mouse.wheel(0, 900)
+                    page.wait_for_timeout(1200)
+                except Exception:
+                    pass
+
+                dismiss_overlays(page)
                 try_open_comments(page)
-                box = first_visible(page, COMMENT_BOX_SELECTORS, timeout_ms=5000)
+                page_diagnostics(page)
+
+                try:
+                    box = first_visible(page, COMMENT_BOX_SELECTORS, timeout_ms=3000)
+                except Exception:
+                    # Иногда TikTok использует обычный textarea вместо contenteditable.
+                    print("  Пробую textarea...", flush=True)
+                    box = first_visible(
+                        page,
+                        [
+                            'textarea[placeholder*="comment" i]',
+                            'textarea[placeholder*="коммент" i]',
+                            "textarea",
+                        ],
+                        timeout_ms=3000,
+                    )
 
                 print("[6/7] Ввожу текст...", flush=True)
                 box.click(force=True, timeout=7000)
