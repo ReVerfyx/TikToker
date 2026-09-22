@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import json
 import logging
 import random
@@ -13,6 +14,23 @@ from typing import Any
 
 import yaml
 from tiktok_uploader.upload import TikTokUploader
+import tiktok_uploader.auth as tiktok_auth
+
+_REAL_PRINT = builtins.print
+
+def _safe_tiktok_print(*args, **kwargs):
+    text = " ".join(str(x) for x in args)
+    if text.startswith("DEBUG: Adding cookie:"):
+        return
+    if text.startswith("DEBUG: Failed to add individual cookie"):
+        # В этой строке библиотека печатает только имя cookie и ошибку.
+        # Оставляем её, но не содержимое cookie.
+        return _REAL_PRINT(*args, **kwargs)
+    return _REAL_PRINT(*args, **kwargs)
+
+# В текущей версии tiktok-uploader auth.py печатает целые cookie-словари
+# через обычный print(). Подменяем print только внутри этого модуля.
+tiktok_auth.print = _safe_tiktok_print
 from yt_dlp import YoutubeDL
 from youtube_mirrors import download as mirror_download
 from youtube_mirrors import search as mirror_search
