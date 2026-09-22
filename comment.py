@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parent
 REGISTRY = ROOT / "data" / "accounts.json"
 HISTORY = ROOT / "data" / "comments.csv"
 SCREENSHOT_DIR = ROOT / "data" / "screenshots"
+CAPTCHA_PENDING = ROOT / "data" / "captcha_pending.json"
 
 COMMENT_OPEN_SELECTORS = [
     '[data-e2e="comments"][role="tab"]',
@@ -477,6 +478,39 @@ def save_screenshot(page, account: dict, label: str) -> Path | None:
         return None
 
 
+def save_captcha_pending(
+    account: dict,
+    url: str,
+    text: str,
+    phase: str,
+    screenshot: Path | None = None,
+) -> None:
+    CAPTCHA_PENDING.parent.mkdir(parents=True, exist_ok=True)
+
+    payload = {
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "account": str(account.get("cookie_file") or account.get("username") or ""),
+        "username": str(account.get("username") or ""),
+        "url": url,
+        "text": text,
+        "phase": phase,
+        "screenshot": str(screenshot) if screenshot else "",
+    }
+
+    CAPTCHA_PENDING.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    print("", flush=True)
+    print("=== НУЖНА РУЧНАЯ CAPTCHA ===", flush=True)
+    print(f"Pending сохранён: {CAPTCHA_PENDING}", flush=True)
+    print("1. Открой aRDP.", flush=True)
+    print("2. В Termius выполни: tiktoker-verify pending", flush=True)
+    print("3. Реши пазл в Chromium через RDP.", flush=True)
+    print("", flush=True)
+
+
 def write_history(
     account: dict,
     url: str,
@@ -725,7 +759,10 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                     )
 
                 if captcha_detected(page):
-                    save_screenshot(page, account, "captcha_before_comments")
+                    shot = save_screenshot(page, account, "captcha_before_comments")
+                    save_captcha_pending(
+                        account, url, text, "before_comments", shot
+                    )
                     raise RuntimeError("CAPTCHA detected before comments")
 
                 print("[5/7] Открываю комментарии и ищу поле...", flush=True)
@@ -832,7 +869,10 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                     )
 
                 if captcha_detected(page):
-                    save_screenshot(page, account, "captcha_before_post")
+                    shot = save_screenshot(page, account, "captcha_before_post")
+                    save_captcha_pending(
+                        account, url, text, "before_post", shot
+                    )
                     raise RuntimeError("CAPTCHA detected before post")
 
                 dismiss_overlays(page)
@@ -865,7 +905,10 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                 save_screenshot(page, account, "after_post_click")
 
                 if captcha_after_post:
-                    save_screenshot(page, account, "captcha_after_post")
+                    shot = save_screenshot(page, account, "captcha_after_post")
+                    save_captcha_pending(
+                        account, url, text, "after_post_click", shot
+                    )
                     print(
                         "  CAPTCHA ПОСЛЕ ОТПРАВКИ: TikTok показал проверку с пазлом.",
                         flush=True,
@@ -926,7 +969,10 @@ def post_comment(url: str, text: str, account_name: str) -> None:
 
                 # Последняя проверка прямо перед sent: CAPTCHA могла появиться с задержкой.
                 if captcha_detected(page):
-                    save_screenshot(page, account, "captcha_late")
+                    shot = save_screenshot(page, account, "captcha_late")
+                    save_captcha_pending(
+                        account, url, text, "late", shot
+                    )
                     raise RuntimeError(
                         "CAPTCHA detected before success confirmation; "
                         "comment is NOT confirmed"
