@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import shlex
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -192,16 +193,16 @@ def preview_commands(url: str, text: str, accounts_value: str) -> None:
     for i, row in enumerate(accounts, start=1):
         username = str(row.get("username") or "").strip()
         account_arg = f"@{username}" if username else str(row.get("cookie_file") or "")
-        safe_url = url.replace("'", "'"'"'")
-        safe_text = text.replace("'", "'"'"'")
-        safe_account = account_arg.replace("'", "'"'"'")
+        safe_url = shlex.quote(url)
+        safe_text = shlex.quote(text)
+        safe_account = shlex.quote(account_arg)
 
         print(f"{i}. {account_arg}")
         print(
             "tiktoker-comment post "
-            f"--url '{safe_url}' "
-            f"--text '{safe_text}' "
-            f"--account '{safe_account}'"
+            f"--url {safe_url} "
+            f"--text {safe_text} "
+            f"--account {safe_account}"
         )
         print()
 
