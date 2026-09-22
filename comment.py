@@ -363,19 +363,38 @@ def save_screenshot(page, account: dict, label: str) -> Path | None:
             for ch in username
         ).strip("_") or "account"
 
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
         path = SCREENSHOT_DIR / f"{stamp}_{safe_user}_{label}.png"
+
+        print(f"[SCREENSHOT] save -> {path}", flush=True)
 
         page.screenshot(
             path=str(path),
-            full_page=True,
+            full_page=False,
             animations="disabled",
+            timeout=15000,
         )
 
-        print(f"Скриншот: {path}", flush=True)
+        exists = path.is_file()
+        size = path.stat().st_size if exists else 0
+
+        print(
+            f"[SCREENSHOT] exists={exists} size={size} path={path}",
+            flush=True,
+        )
+
+        if not exists or size < 100:
+            raise RuntimeError(
+                f"PNG не записался корректно: exists={exists}, size={size}"
+            )
+
         return path
     except Exception as exc:
-        print(f"Не удалось сохранить скриншот: {exc}", file=sys.stderr, flush=True)
+        print(
+            f"[SCREENSHOT ERROR] {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+            flush=True,
+        )
         return None
 
 
@@ -627,6 +646,7 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                 auth_diagnostics(page)
                 print_comment_network(comment_network)
                 comment_dom_inventory(page)
+                save_screenshot(page, account, "comments_open")
 
                 try:
                     box = first_visible(page, COMMENT_BOX_SELECTORS, timeout_ms=3000)
@@ -696,6 +716,7 @@ def post_comment(url: str, text: str, account_name: str) -> None:
 
                     print(f"  Текст после fallback: {current_text!r}", flush=True)
 
+                save_screenshot(page, account, "text_typed")
                 print("[7/7] Ищу кнопку отправки...", flush=True)
                 post = first_visible(page, POST_BUTTON_SELECTORS, timeout_ms=7000)
 
@@ -729,6 +750,11 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                 page.wait_for_timeout(2500)
 
                 save_screenshot(page, account, "after_post")
+                print(
+                    "[DEBUG] Скриншоты лежат в: "
+                    f"{SCREENSHOT_DIR}",
+                    flush=True,
+                )
 
                 if "/login" in page.url.lower():
                     raise RuntimeError(
