@@ -19,6 +19,10 @@ REGISTRY = ROOT / "data" / "accounts.json"
 HISTORY = ROOT / "data" / "comments.csv"
 
 COMMENT_OPEN_SELECTORS = [
+    '[data-e2e="comments"][role="tab"]',
+    '[data-e2e="comments"]',
+    '[data-e2e="comment-icon"][role="button"]',
+    '[data-e2e="comment-icon"]',
     'button:has([data-e2e="comment-icon"])',
     'button:has([data-e2e="browse-comment-icon"])',
     '[data-e2e="browse-comment"]',
@@ -261,20 +265,49 @@ def try_open_comments(page) -> None:
 
     for selector in COMMENT_OPEN_SELECTORS:
         try:
-            locator = page.locator(selector).first
-            if locator.count() < 1:
-                continue
-            if not locator.is_visible(timeout=1500):
+            locators = page.locator(selector)
+            count = locators.count()
+            if count < 1:
                 continue
 
-            print(f"  Открываю комментарии: {selector}", flush=True)
-            locator.click(timeout=5000)
-            page.wait_for_timeout(1200)
-            return
+            for i in range(min(count, 6)):
+                locator = locators.nth(i)
+                try:
+                    if not locator.is_visible(timeout=1200):
+                        continue
+
+                    print(
+                        f"  Открываю комментарии: {selector} (элемент {i + 1}/{count})",
+                        flush=True,
+                    )
+                    try:
+                        locator.scroll_into_view_if_needed(timeout=2500)
+                    except Exception:
+                        pass
+
+                    locator.click(timeout=5000)
+                    page.wait_for_timeout(1800)
+
+                    if (
+                        page.locator('[contenteditable="true"]').count() > 0
+                        or page.locator("textarea").count() > 0
+                        or page.locator('[data-e2e="comment-input"]').count() > 0
+                    ):
+                        print("  Панель комментариев открыта.", flush=True)
+                        return
+
+                    # Если это вкладка Comments, её клик всё равно мог смонтировать sidebar.
+                    # Дадим React ещё немного времени перед следующим кандидатом.
+                    page.wait_for_timeout(700)
+                except Exception:
+                    continue
         except Exception:
             continue
 
-    print("  Отдельная кнопка комментариев не найдена, ищу поле сразу.", flush=True)
+    print(
+        "  Кнопка комментариев найдена/проверена, но поле ввода пока не появилось.",
+        flush=True,
+    )
 
 
 def first_visible(page, selectors: list[str], timeout_ms: int = 7000):
