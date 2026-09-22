@@ -620,16 +620,17 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                 box.click(force=True, timeout=7000)
                 page.wait_for_timeout(250)
 
-                # TikTok использует React contenteditable. fill() иногда меняет DOM,
-                # но не генерирует нужные input-события, из-за чего кнопка остаётся disabled.
+                # TikTok использует React contenteditable. Набираем текст
+                # обычными клавиатурными событиями, чтобы React получил key/input events.
                 try:
                     page.keyboard.press("Control+A")
                     page.keyboard.press("Backspace")
                 except Exception:
                     pass
 
-                page.keyboard.insert_text(text)
-                page.wait_for_timeout(900)
+                print("  Печатаю комментарий посимвольно...", flush=True)
+                page.keyboard.type(text, delay=90)
+                page.wait_for_timeout(1000)
 
                 try:
                     current_text = (box.inner_text(timeout=2000) or "").strip()
@@ -640,23 +641,21 @@ def post_comment(url: str, text: str, account_name: str) -> None:
 
                 if text not in current_text:
                     print(
-                        "  Первый ввод не зарегистрировался, пробую через JS events.",
+                        "  Посимвольный ввод не зарегистрировался, пробую insert_text.",
                         flush=True,
                     )
-                    box.evaluate(
-                        """(el, value) => {
-                            el.focus();
-                            el.textContent = value;
-                            el.dispatchEvent(new InputEvent('input', {
-                                bubbles: true,
-                                inputType: 'insertText',
-                                data: value
-                            }));
-                            el.dispatchEvent(new Event('change', {bubbles: true}));
-                        }""",
-                        text,
-                    )
+                    box.click(force=True, timeout=3000)
+                    page.keyboard.press("Control+A")
+                    page.keyboard.press("Backspace")
+                    page.keyboard.insert_text(text)
                     page.wait_for_timeout(900)
+
+                    try:
+                        current_text = (box.inner_text(timeout=2000) or "").strip()
+                    except Exception:
+                        current_text = ""
+
+                    print(f"  Текст после fallback: {current_text!r}", flush=True)
 
                 print("[7/7] Ищу кнопку отправки...", flush=True)
                 post = first_visible(page, POST_BUTTON_SELECTORS, timeout_ms=7000)
