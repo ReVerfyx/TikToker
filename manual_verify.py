@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import pwd
+import re
+import shlex
 import shutil
-import sys
-import time
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -17,6 +20,57 @@ from comment import captcha_detected, resolve_account
 
 ROOT = Path(__file__).resolve().parent
 BACKUP_DIR = ROOT / "data" / "cookie_backups"
+PENDING = ROOT / "data" / "captcha_pending.json"
+
+
+def detect_rdp_display() -> tuple[str, str | None]:
+    current = os.environ.get("DISPLAY")
+    if current:
+        return current, None
+
+    try:
+        output = subprocess.check_output(
+            ["ps", "-eo", "user=,args="],
+            text=True,
+            errors="ignore",
+        )
+    except Exception:
+        output = ""
+
+    candidates: list[tuple[int, str]] = []
+
+    for line in output.splitlines():
+        if "Xorg" not in line or "xrdp" not in line.lower():
+            continue
+
+        match = re.search(r"\s:(\d+)(?:\s|$)", line)
+        if not match:
+            continue
+
+        user = line.strip().split(None, 1)[0]
+        candidates.append((int(match.group(1)), user))
+
+    if not candidates:
+        raise SystemExit(
+            "Активная RDP-сессия не найдена.\n"
+            "Открой aRDP, дождись рабочего стола Ubuntu, затем вернись "
+            "в Termius и снова выполни: tiktoker-verify pending"
+        )
+
+    number, user = sorted(candidates, reverse=True)[0]
+    display = f":{number}"
+
+    os.environ["DISPLAY"] = display
+
+    try:
+        home = Path(pwd.getpwnam(user).pw_dir)
+        xauth = home / ".Xauthority"
+        if xauth.is_file():
+            os.environ["XAUTHORITY"] = str(xauth)
+    except Exception:
+        pass
+
+    return display, user
 
 
 def write_netscape(path: Path, cookies: list[dict]) -> None:
@@ -70,7 +124,8 @@ def save_updated_cookies(context, cookie_path: Path) -> Path:
     shutil.copy2(cookie_path, backup)
 
     cookies = [
-        c for c in context.cookies()
+        c
+        for c in context.cookies()
         if "tiktok.com" in str(c.get("domain") or "").lower()
     ]
 
@@ -81,35 +136,67 @@ def save_updated_cookies(context, cookie_path: Path) -> Path:
     return backup
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Ручная проверка TikTok CAPTCHA в видимом Chromium."
-    )
-    parser.add_argument("--account", required=True)
-    parser.add_argument(
-        "--url",
-        default="https://www.tiktok.com/",
-        help="Страница TikTok, которую открыть для ручной проверки.",
-    )
-    args = parser.parse_args()
-
-    if not os.environ.get("DISPLAY"):
+def load_pending() -> dict:
+    if not PENDING.is_file():
         raise SystemExit(
-            "Нет DISPLAY. Запусти эту команду в Терминале внутри RDP-рабочего стола, "
-            "а не через обычный SSH/Termius."
+            "Нет ожидающей CAPTCHA. Сначала обычный tiktoker-comment должен "
+            "обнаружить CAPTCHA."
         )
 
-    account = resolve_account(args.account)
+    try:
+        data = json.loads(PENDING.read_text("utf-8"))
+    except Exception as exc:
+        raise SystemExit(f"Не удалось прочитать {PENDING}: {exc}")
+
+    if not isinstance(data, dict) or not data.get("account"):
+        raise SystemExit(f"Некорректный pending-файл: {PENDING}")
+
+    return data
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Ручная проверка TikTok CAPTCHA через xRDP."
+    )
+    parser.add_argument(
+        "mode",
+        nargs="?",
+        choices=["pending"],
+        help="Используй 'pending', чтобы открыть последнюю пойманную CAPTCHA.",
+    )
+    parser.add_argument("--account")
+    parser.add_argument("--url")
+    args = parser.parse_args()
+
+    pending: dict = {}
+
+    if args.mode == "pending":
+        pending = load_pending()
+        account_value = str(pending["account"])
+        url = str(pending.get("url") or "https://www.tiktok.com/")
+    else:
+        if not args.account:
+            parser.error("Нужен --account или команда: tiktoker-verify pending")
+        account_value = args.account
+        url = args.url or "https://www.tiktok.com/"
+
+    display, rdp_user = detect_rdp_display()
+
+    print(f"RDP DISPLAY найден: {display}")
+    if rdp_user:
+        print(f"RDP пользователь: {rdp_user}")
+
+    account = resolve_account(account_value)
     cookie_path = Path(account["cookie_path"])
     cookies = parse_netscape(cookie_path)
 
     if not cookies:
         raise SystemExit(f"Cookie-файл пуст: {cookie_path}")
 
-    username = str(account.get("username") or args.account)
+    username = str(account.get("username") or account_value)
     print(f"Аккаунт: @{username}")
-    print(f"Открываю: {args.url}")
-    print("Chromium будет видимым. Не закрывай его вручную до сохранения cookies.")
+    print(f"Открываю: {url}")
+    print("Сейчас Chromium появится на рабочем столе aRDP.")
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(
@@ -134,7 +221,7 @@ def main() -> None:
         try:
             try:
                 page.goto(
-                    args.url,
+                    url,
                     wait_until="domcontentloaded",
                     timeout=30000,
                 )
@@ -144,31 +231,48 @@ def main() -> None:
             page.wait_for_timeout(2000)
 
             print()
-            print("=== ЧТО ДЕЛАТЬ НА ТЕЛЕФОНЕ ===")
-            print("1. Переключись обратно в окно RDP.")
-            print("2. В Chromium открой комментарии/действие, которое вызывает проверку.")
-            print("3. Если появился пазл TikTok — реши его пальцем через RDP.")
-            print("4. Когда проверка исчезнет, вернись в этот терминал.")
-            print("5. Нажми Enter.")
+            print("=== ДАЛЬШЕ ТОЛЬКО РУКАМИ ===")
+            print("1. Переключись в aRDP — Chromium уже должен быть там.")
+            print("2. Если пазл уже виден — реши его.")
+            print("3. Если пазла ещё нет — повтори в браузере действие, которое его вызвало.")
+            print("4. Когда CAPTCHA полностью исчезнет, вернись в Termius.")
+            print("5. Нажми Enter здесь.")
             print()
 
             while True:
-                input("Нажми Enter после ручного решения CAPTCHA... ")
-
+                input("Enter после решения CAPTCHA: ")
                 page.wait_for_timeout(1000)
 
                 if captcha_detected(page):
-                    print(
-                        "CAPTCHA всё ещё видна. Реши пазл до конца и снова нажми Enter."
-                    )
+                    print("CAPTCHA всё ещё видна. Реши её до конца.")
                     continue
 
-                print("CAPTCHA на странице не обнаружена.")
+                print("CAPTCHA больше не обнаружена.")
                 break
 
             backup = save_updated_cookies(context, cookie_path)
             print(f"Cookies обновлены: {cookie_path}")
-            print(f"Резервная копия старых cookies: {backup}")
+            print(f"Backup старых cookies: {backup}")
+
+            if args.mode == "pending":
+                try:
+                    PENDING.unlink()
+                except FileNotFoundError:
+                    pass
+
+                text = str(pending.get("text") or "")
+                if text:
+                    retry = (
+                        "tiktoker-comment post "
+                        f"--account {shlex.quote(account_value)} "
+                        f"--url {shlex.quote(url)} "
+                        f"--text {shlex.quote(text)}"
+                    )
+                    print()
+                    print("Теперь RDP можно закрыть.")
+                    print("Повторить комментарий из Termius:")
+                    print(retry)
+
             print("Ручная проверка завершена.")
 
         finally:
