@@ -290,6 +290,35 @@ def _ffmpeg_separate(video_url: str, audio_url: str, target: Path) -> None:
     )
 
 
+def _piped_video_info_only(
+    video_id: str,
+    cfg: dict[str, Any],
+    skip_base: str = "",
+) -> dict[str, Any] | None:
+    for base in _instances(cfg, "piped_instances", DEFAULT_PIPED):
+        if base == skip_base:
+            continue
+        try:
+            data = _json_get(base, f"/streams/{video_id}", cfg)
+            if not data.get("title"):
+                continue
+            return {
+                "id": video_id,
+                "title": str(data.get("title") or video_id),
+                "description": str(data.get("description") or ""),
+                "duration": int(data.get("duration") or 0),
+                "channel": str(data.get("uploader") or ""),
+                "uploader": str(data.get("uploader") or ""),
+                "webpage_url": f"https://www.youtube.com/watch?v={video_id}",
+                "_mirror_provider": "piped",
+                "_mirror_base": base,
+                "_mirror_raw": data,
+            }
+        except Exception as exc:
+            LOG.warning("Piped %s fallback не дал видео %s: %s", base, video_id, exc)
+    return None
+
+
 def _download_invidious(info: dict[str, Any], work: Path, cfg: dict[str, Any]) -> Path:
     raw = info.get("_mirror_raw") or {}
     base = str(info.get("_mirror_base") or "").rstrip("/")
@@ -447,13 +476,28 @@ def download(info: dict[str, Any], work: Path, cfg: dict[str, Any]) -> Path:
         try:
             return _download_invidious(info, work, cfg)
         except Exception as first_error:
-            LOG.warning("Текущий Invidious не скачал видео: %s", first_error)
-            refreshed = video_info(str(info["id"]), cfg)
-            if refreshed and refreshed.get("_mirror_provider") != "invidious":
-                return download(refreshed, work, cfg)
+            LOG.warning(
+                "Invidious дал метаданные, но поток не скачался: %s. "
+                "Переключаюсь на Piped.",
+                first_error,
+            )
+            piped = _piped_video_info_only(str(info["id"]), cfg)
+            if piped:
+                return _download_piped(piped, work, cfg)
             raise
 
     if provider == "piped":
-        return _download_piped(info, work, cfg)
+        try:
+            return _download_piped(info, work, cfg)
+        except Exception as first_error:
+            LOG.warning("Piped %s не скачал поток: %s", info.get("_mirror_base"), first_error)
+            next_piped = _piped_video_info_only(
+                str(info["id"]),
+                cfg,
+                skip_base=str(info.get("_mirror_base") or ""),
+            )
+            if next_piped:
+                return _download_piped(next_piped, work, cfg)
+            raise
 
     raise RuntimeError("Неизвестный mirror provider")
