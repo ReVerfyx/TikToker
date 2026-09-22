@@ -115,6 +115,42 @@ def resolve_account(value: str) -> dict:
     return row
 
 
+def comment_dom_inventory(page) -> None:
+    try:
+        items = page.locator('[data-e2e*="comment" i]').evaluate_all(
+            """els => els.slice(0, 40).map(el => ({
+                tag: el.tagName,
+                e2e: el.getAttribute('data-e2e') || '',
+                role: el.getAttribute('role') || '',
+                aria: el.getAttribute('aria-label') || '',
+                text: (el.innerText || '').trim().slice(0, 80)
+            }))"""
+        )
+    except Exception:
+        items = []
+
+    if not items:
+        print("  Comment DOM inventory: ничего не найдено.", flush=True)
+        return
+
+    print("  Comment DOM inventory:", flush=True)
+    seen = set()
+    for item in items:
+        key = (item.get("tag"), item.get("e2e"), item.get("role"), item.get("aria"), item.get("text"))
+        if key in seen:
+            continue
+        seen.add(key)
+        print(
+            "    "
+            f"<{item.get('tag','')}> "
+            f"data-e2e={item.get('e2e','')!r} "
+            f"role={item.get('role','')!r} "
+            f"aria={item.get('aria','')!r} "
+            f"text={item.get('text','')!r}",
+            flush=True,
+        )
+
+
 def auth_diagnostics(page) -> None:
     checks = {
         "login_button": [
@@ -426,6 +462,9 @@ def post_comment(url: str, text: str, account_name: str) -> None:
             print("[3/7] Создаю сессию аккаунта...", flush=True)
             context = browser.new_context(
                 locale="ru-RU",
+                viewport={"width": 1920, "height": 1080},
+                screen={"width": 1920, "height": 1080},
+                device_scale_factor=1,
                 user_agent=(
                     "Mozilla/5.0 (X11; Linux x86_64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -463,12 +502,29 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                 except PlaywrightTimeoutError:
                     print("  Страница грузилась слишком долго, продолжаю с уже загруженным DOM.", flush=True)
 
-                page.wait_for_timeout(1500)
+                page.wait_for_timeout(1800)
+
+                # Короткая vt.tiktok.com ссылка редиректит с tracking query.
+                # Повторное открытие canonical video URL часто монтирует полный desktop layout.
+                try:
+                    from urllib.parse import urlsplit, urlunsplit
+                    parts = urlsplit(page.url)
+                    if "tiktok.com" in parts.netloc.lower() and "/video/" in parts.path and parts.query:
+                        canonical_url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+                        print(f"  Канонический URL: {canonical_url}", flush=True)
+                        page.goto(canonical_url, wait_until="domcontentloaded", timeout=25000)
+                        page.wait_for_timeout(2500)
+                except PlaywrightTimeoutError:
+                    print("  Каноническая страница грузилась долго, продолжаю.", flush=True)
+                except Exception as exc:
+                    print(f"  Не удалось переоткрыть canonical URL: {exc}", flush=True)
+
                 print(f"  Итоговый URL: {page.url}", flush=True)
                 dismiss_overlays(page)
                 page_diagnostics(page)
                 auth_diagnostics(page)
                 print_comment_network(comment_network)
+                comment_dom_inventory(page)
 
                 if "/login" in page.url.lower():
                     raise RuntimeError(
@@ -487,6 +543,7 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                 page_diagnostics(page)
                 auth_diagnostics(page)
                 print_comment_network(comment_network)
+                comment_dom_inventory(page)
 
                 try:
                     box = first_visible(page, COMMENT_BOX_SELECTORS, timeout_ms=3000)
