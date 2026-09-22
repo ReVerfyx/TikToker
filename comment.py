@@ -42,8 +42,32 @@ def load_registry() -> list[dict]:
 
 
 def resolve_account(value: str) -> dict:
-    needle = value.strip().lstrip("@").lower()
+    raw_value = value.strip()
+    needle = raw_value.lstrip("@").lower()
     rows = load_registry()
+
+    active_rows = [
+        row for row in rows
+        if row.get("status") == "public" and row.get("enabled") is True
+    ]
+
+    # Удобный выбор по номеру из списка активных аккаунтов:
+    # --account 1 = первый, --account 2 = второй и т.д.
+    if raw_value.isdigit():
+        index = int(raw_value)
+        if index < 1 or index > len(active_rows):
+            raise SystemExit(
+                f"Номер аккаунта вне диапазона: {index}. "
+                f"Доступно активных аккаунтов: {len(active_rows)}"
+            )
+
+        row = dict(active_rows[index - 1])
+        cookie_path = ROOT / "cookies" / str(row.get("cookie_file") or "")
+        if not cookie_path.is_file():
+            raise SystemExit(f"Нет cookie-файла: {cookie_path}")
+
+        row["cookie_path"] = cookie_path
+        return row
 
     matches = []
 
