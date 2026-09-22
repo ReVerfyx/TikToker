@@ -34,8 +34,11 @@ if [ ! -d .venv ]; then
   python3 -m venv .venv
 fi
 
-.venv/bin/python -m pip install --upgrade pip wheel
-.venv/bin/pip install -r requirements.txt
+export PIP_DEFAULT_TIMEOUT=120
+export PIP_RETRIES=10
+
+.venv/bin/python -m pip install --timeout 120 --retries 10 --upgrade pip wheel
+.venv/bin/pip install --timeout 120 --retries 10 -r requirements.txt
 .venv/bin/playwright install chromium
 
 mkdir -p cookies data/work logs
