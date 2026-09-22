@@ -319,25 +319,36 @@ def _piped_video_info_only(
     return None
 
 
+def _absolute_stream_url(base: str, url: str) -> str:
+    url = str(url or "").strip()
+    if not url:
+        return ""
+    if url.startswith("//"):
+        return "https:" + url
+    if url.startswith("/"):
+        return base.rstrip("/") + url
+    return url
+
+
 def _download_invidious(info: dict[str, Any], work: Path, cfg: dict[str, Any]) -> Path:
     raw = info.get("_mirror_raw") or {}
     base = str(info.get("_mirror_base") or "").rstrip("/")
-    video_id = str(info["id"])
     maximum = _max_height(cfg)
+    target = work / "source.mkv"
 
+    # 1) Сначала используем URL, которые Invidious уже вернул в API.
+    # При local=true это может быть проксированный URL самого инстанса.
     formats = [
-        item
-        for item in (raw.get("formatStreams") or [])
-        if isinstance(item, dict)
+        item for item in (raw.get("formatStreams") or [])
+        if isinstance(item, dict) and item.get("url")
     ]
 
-    mp4 = [
-        item
-        for item in formats
+    mp4_formats = [
+        item for item in formats
         if str(item.get("container") or "").lower() in ("mp4", "")
     ]
-    if mp4:
-        formats = mp4
+    if mp4_formats:
+        formats = mp4_formats
 
     formats.sort(
         key=lambda item: _within_height(
@@ -348,6 +359,98 @@ def _download_invidious(info: dict[str, Any], work: Path, cfg: dict[str, Any]) -
     )
 
     for item in formats:
+        url = _absolute_stream_url(base, str(item.get("url") or ""))
+        if not url:
+            continue
+        try:
+            _ffmpeg_progressive(url, target)
+            if target.is_file() and target.stat().st_size > 1024:
+                LOG.info(
+                    "Видео скачано через URL Invidious: %s (%s)",
+                    base,
+                    item.get("qualityLabel") or item.get("resolution") or "?",
+                )
+                return target
+        except Exception as exc:
+            LOG.warning(
+                "Invidious formatStreams URL не скачался (%s): %s",
+                item.get("qualityLabel") or item.get("itag"),
+                exc,
+            )
+            target.unlink(missing_ok=True)
+
+    # 2) Если progressive нет/не работает, пробуем adaptive video + audio.
+    adaptive = [
+        item for item in (raw.get("adaptiveFormats") or [])
+        if isinstance(item, dict) and item.get("url")
+    ]
+
+    videos = []
+    audios = []
+
+    for item in adaptive:
+        media_type = str(item.get("type") or "").lower()
+        if media_type.startswith("audio/") or item.get("audioQuality"):
+            audios.append(item)
+        elif media_type.startswith("video/") or item.get("qualityLabel"):
+            videos.append(item)
+
+    mp4_videos = [
+        item for item in videos
+        if "mp4" in str(item.get("type") or "").lower()
+        or str(item.get("container") or "").lower() == "mp4"
+    ]
+    if mp4_videos:
+        videos = mp4_videos
+
+    videos.sort(
+        key=lambda item: _within_height(
+            _height(item.get("qualityLabel") or item.get("resolution")),
+            maximum,
+        ),
+        reverse=True,
+    )
+
+    mp4_audios = [
+        item for item in audios
+        if "mp4" in str(item.get("type") or "").lower()
+        or str(item.get("container") or "").lower() in ("m4a", "mp4")
+    ]
+    if mp4_audios:
+        audios = mp4_audios
+
+    audios.sort(
+        key=lambda item: int(item.get("bitrate") or 0),
+        reverse=True,
+    )
+
+    for video_item in videos[:3]:
+        video_url = _absolute_stream_url(base, str(video_item.get("url") or ""))
+        if not video_url:
+            continue
+        for audio_item in audios[:3]:
+            audio_url = _absolute_stream_url(base, str(audio_item.get("url") or ""))
+            if not audio_url:
+                continue
+            try:
+                _ffmpeg_separate(video_url, audio_url, target)
+                if target.is_file() and target.stat().st_size > 1024:
+                    LOG.info(
+                        "Видео+аудио скачаны через adaptiveFormats Invidious: %s (%s)",
+                        base,
+                        video_item.get("qualityLabel") or video_item.get("resolution") or "?",
+                    )
+                    return target
+            except Exception as exc:
+                LOG.warning(
+                    "Invidious adaptiveFormats не скачались (%s): %s",
+                    video_item.get("qualityLabel") or video_item.get("itag"),
+                    exc,
+                )
+                target.unlink(missing_ok=True)
+
+    # 3) Последняя попытка для старых/ограниченных инстансов — latest_version.
+    for item in formats:
         itag = str(item.get("itag") or "").strip()
         if not itag:
             continue
@@ -356,29 +459,30 @@ def _download_invidious(info: dict[str, Any], work: Path, cfg: dict[str, Any]) -
             f"{base}/latest_version?"
             + urllib.parse.urlencode(
                 {
-                    "id": video_id,
+                    "id": str(info["id"]),
                     "itag": itag,
                     "local": "true",
                 }
             )
         )
 
-        target = work / "source.mkv"
         try:
             _ffmpeg_progressive(url, target)
             if target.is_file() and target.stat().st_size > 1024:
-                LOG.info("Видео скачано через Invidious: %s", base)
+                LOG.info("Видео скачано через latest_version Invidious: %s", base)
                 return target
         except Exception as exc:
             LOG.warning(
-                "Invidious поток %s itag=%s не скачался: %s",
+                "Invidious latest_version %s itag=%s не скачался: %s",
                 base,
                 itag,
                 exc,
             )
             target.unlink(missing_ok=True)
 
-    raise RuntimeError(f"Invidious {base} не дал скачиваемый progressive-поток")
+    raise RuntimeError(
+        f"Invidious {base} дал метаданные, но ни один media URL не скачался"
+    )
 
 
 def _download_piped(info: dict[str, Any], work: Path, cfg: dict[str, Any]) -> Path:
