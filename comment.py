@@ -512,7 +512,7 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                     if "tiktok.com" in parts.netloc.lower() and "/video/" in parts.path and parts.query:
                         canonical_url = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
                         print(f"  Канонический URL: {canonical_url}", flush=True)
-                        page.goto(canonical_url, wait_until="domcontentloaded", timeout=25000)
+                        page.goto(canonical_url, wait_until="commit", timeout=12000)
                         page.wait_for_timeout(2500)
                 except PlaywrightTimeoutError:
                     print("  Каноническая страница грузилась долго, продолжаю.", flush=True)
