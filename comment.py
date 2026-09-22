@@ -102,13 +102,15 @@ def resolve_account(value: str) -> dict:
     return row
 
 
-def first_visible(page, selectors: list[str], timeout_ms: int = 15000):
+def first_visible(page, selectors: list[str], timeout_ms: int = 7000):
     last_error = None
 
     for selector in selectors:
+        print(f"  Ищу элемент: {selector}", flush=True)
         locator = page.locator(selector).first
         try:
             locator.wait_for(state="visible", timeout=timeout_ms)
+            print(f"  Найден: {selector}", flush=True)
             return locator
         except Exception as exc:
             last_error = exc
@@ -273,12 +275,16 @@ def post_comment(url: str, text: str, account_name: str) -> None:
     print(f"Комментарий: {text}")
 
     try:
+        print("[1/7] Запускаю Playwright...", flush=True)
         with sync_playwright() as pw:
+            print("[2/7] Запускаю Chromium...", flush=True)
             browser = pw.chromium.launch(
                 headless=True,
+                timeout=20000,
                 args=["--no-sandbox", "--disable-dev-shm-usage"],
             )
 
+            print("[3/7] Создаю сессию аккаунта...", flush=True)
             context = browser.new_context(
                 locale="ru-RU",
                 user_agent=(
@@ -287,42 +293,49 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                     "Chrome/140.0.0.0 Safari/537.36"
                 ),
             )
+            context.set_default_timeout(10000)
+            context.set_default_navigation_timeout(25000)
 
             try:
                 context.add_cookies(cookies)
                 page = context.new_page()
 
+                print("[4/7] Открываю видео...", flush=True)
                 try:
                     page.goto(
                         url,
                         wait_until="domcontentloaded",
-                        timeout=45000,
+                        timeout=25000,
                     )
                 except PlaywrightTimeoutError:
-                    pass
+                    print("  Страница грузилась слишком долго, продолжаю с уже загруженным DOM.", flush=True)
 
-                page.wait_for_timeout(2000)
+                page.wait_for_timeout(1500)
+                print(f"  Итоговый URL: {page.url}", flush=True)
 
                 if "/login" in page.url.lower():
                     raise RuntimeError(
                         "TikTok отправил на страницу входа: cookies недействительны."
                     )
 
-                box = first_visible(page, COMMENT_BOX_SELECTORS)
+                print("[5/7] Ищу поле комментария...", flush=True)
+                box = first_visible(page, COMMENT_BOX_SELECTORS, timeout_ms=7000)
 
-                box.click(force=True)
+                print("[6/7] Ввожу текст...", flush=True)
+                box.click(force=True, timeout=7000)
                 page.wait_for_timeout(300)
 
                 try:
-                    box.fill(text)
+                    box.fill(text, timeout=7000)
                 except Exception:
                     page.keyboard.press("Control+A")
                     page.keyboard.press("Backspace")
                     page.keyboard.insert_text(text)
 
-                page.wait_for_timeout(600)
+                page.wait_for_timeout(500)
 
-                post = first_visible(page, POST_BUTTON_SELECTORS, timeout_ms=10000)
+                print("[7/7] Ищу кнопку отправки...", flush=True)
+                post = first_visible(page, POST_BUTTON_SELECTORS, timeout_ms=7000)
 
                 disabled = post.get_attribute("aria-disabled")
                 if disabled == "true":
@@ -331,18 +344,19 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                         "Возможно, комментарии отключены."
                     )
 
-                post.click()
-                page.wait_for_timeout(2500)
+                post.click(timeout=7000)
+                page.wait_for_timeout(2000)
 
                 if "/login" in page.url.lower():
                     raise RuntimeError(
                         "После отправки TikTok запросил повторный вход."
                     )
 
-                print("Комментарий отправлен.")
+                print("Комментарий отправлен.", flush=True)
                 write_history(account, url, text, "sent")
 
             finally:
+                print("Закрываю сессию браузера.", flush=True)
                 context.close()
                 browser.close()
 
