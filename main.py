@@ -168,8 +168,8 @@ def discover(cfg: dict[str, Any], db: DB) -> dict[str, Any] | None:
     yc = cfg["youtube"]
     mode = str(yc.get("source_mode", "both")).lower()
     limit = int(yc.get("search_results", 20))
-    queries = [str(x).strip() for x in yc.get("queries", []) if str(x).strip()]
-    channels = [str(x).strip() for x in yc.get("channels", []) if str(x).strip()]
+    queries = [str(x).strip() for x in (yc.get("queries") or []) if str(x).strip()]
+    channels = [str(x).strip() for x in (yc.get("channels") or []) if str(x).strip()]
     urls: list[str] = []
 
     if mode in ("search", "both") and queries:
