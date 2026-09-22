@@ -581,14 +581,26 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                 page = context.new_page()
 
                 comment_network = []
+                comment_post_responses = []
 
                 def _capture_response(response):
                     try:
                         from urllib.parse import urlsplit
                         u = urlsplit(response.url)
                         path = u.path.lower()
-                        if "comment" in path or "/api/" in path and "comment" in response.url.lower():
-                            comment_network.append((response.status, f"{u.scheme}://{u.netloc}{u.path}"))
+                        if "comment" in path:
+                            safe_url = f"{u.scheme}://{u.netloc}{u.path}"
+                            comment_network.append((response.status, safe_url))
+
+                            try:
+                                method = response.request.method.upper()
+                            except Exception:
+                                method = ""
+
+                            if method == "POST":
+                                comment_post_responses.append(
+                                    (response.status, safe_url)
+                                )
                     except Exception:
                         pass
 
@@ -663,6 +675,7 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                         timeout_ms=3000,
                     )
 
+                save_screenshot(page, account, "before_typing")
                 print("[6/7] Ввожу текст...", flush=True)
 
                 # TikTok сначала требует явный клик по самой строке ввода.
@@ -736,6 +749,9 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                     )
 
                 dismiss_overlays(page)
+                save_screenshot(page, account, "before_post_click")
+
+                posts_before = len(comment_post_responses)
 
                 try:
                     post.click(timeout=5000)
@@ -747,9 +763,13 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                     dismiss_overlays(page)
                     post.click(timeout=5000, force=True)
 
-                page.wait_for_timeout(2500)
+                print(
+                    "  Клик выполнен. Жду реальный ответ TikTok на отправку...",
+                    flush=True,
+                )
+                page.wait_for_timeout(4000)
 
-                save_screenshot(page, account, "after_post")
+                save_screenshot(page, account, "after_post_click")
                 print(
                     "[DEBUG] Скриншоты лежат в: "
                     f"{SCREENSHOT_DIR}",
@@ -761,7 +781,41 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                         "После отправки TikTok запросил повторный вход."
                     )
 
-                print("Комментарий отправлен.", flush=True)
+                new_posts = comment_post_responses[posts_before:]
+
+                if new_posts:
+                    print("  POST-ответы TikTok по комментариям:", flush=True)
+                    for status, endpoint in new_posts:
+                        print(f"    HTTP {status} {endpoint}", flush=True)
+                else:
+                    print(
+                        "  POST-ответов TikTok по комментариям после клика НЕТ.",
+                        flush=True,
+                    )
+
+                try:
+                    field_after = (box.inner_text(timeout=2000) or "").strip()
+                except Exception:
+                    field_after = "<поле исчезло>"
+
+                print(
+                    f"  Поле после клика: {field_after!r}",
+                    flush=True,
+                )
+
+                ok_posts = [
+                    (status, endpoint)
+                    for status, endpoint in new_posts
+                    if 200 <= int(status) < 400
+                ]
+
+                if not ok_posts:
+                    raise RuntimeError(
+                        "Отправка НЕ подтверждена: после клика нет успешного "
+                        "POST-ответа TikTok для комментария."
+                    )
+
+                print("Комментарий отправлен и подтвержден TikTok.", flush=True)
                 write_history(account, url, text, "sent")
 
             finally:
