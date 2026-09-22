@@ -298,6 +298,7 @@ def scan_one(browser, cookie_path: Path, source_meta: dict) -> dict:
 
     finally:
         context.close()
+        print(f"    [CLOSE] Сессия {cookie_path.name} закрыта")
 
 
 def write_registry(rows: list[dict]) -> None:
