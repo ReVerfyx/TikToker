@@ -5,3 +5,5 @@ config.yaml
 cookies/
 data/
 *.log
+
+youtube_cookies.txt
