@@ -2,6 +2,13 @@ language: "ru"
 
 youtube:
   check_every_seconds: 3600
+
+  # Если VPS получает "Sign in to confirm you're not a bot",
+  # положи Netscape cookies сюда. Файл исключён из Git.
+  cookies_file: "youtube_cookies.txt"
+
+  # Небольшая пауза между запросами yt-dlp.
+  sleep_requests: 2
   search_results: 20
   min_duration_seconds: 60
   max_duration_seconds: 10800
