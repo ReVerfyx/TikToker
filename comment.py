@@ -206,6 +206,51 @@ def preview_commands(url: str, text: str, accounts_value: str) -> None:
         print()
 
 
+def next_comments(url: str, text: str, accounts_value: str) -> None:
+    accounts = resolve_accounts_list(accounts_value)
+
+    if "tiktok.com/" not in url.lower():
+        raise SystemExit("Нужна ссылка на TikTok-видео.")
+
+    text = text.strip()
+    if not text:
+        raise SystemExit("Комментарий пустой.")
+
+    print(f"Выбрано аккаунтов: {len(accounts)}")
+    print("Перед каждым комментарием потребуется подтверждение.")
+    print("Команды: y = отправить, s = пропустить, q = выйти")
+    print()
+
+    for index, row in enumerate(accounts, start=1):
+        username = str(row.get("username") or "").strip()
+        account_arg = f"@{username}" if username else str(row.get("cookie_file") or "")
+
+        print(f"[{index}/{len(accounts)}] Аккаунт: {account_arg}")
+        print(f"Текст: {text}")
+
+        while True:
+            answer = input("Отправить? [y/s/q]: ").strip().lower()
+
+            if answer in {"q", "quit", "exit"}:
+                print("Остановлено.")
+                return
+
+            if answer in {"s", "skip"}:
+                print("Пропущено.")
+                print()
+                break
+
+            if answer in {"y", "yes", "да", "д"}:
+                try:
+                    post_comment(url, text, account_arg)
+                except Exception as exc:
+                    print(f"Ошибка для {account_arg}: {exc}", file=sys.stderr)
+                print()
+                break
+
+            print("Введите y, s или q.")
+
+
 def post_comment(url: str, text: str, account_name: str) -> None:
     if "tiktok.com/" not in url.lower():
         raise SystemExit("Нужна ссылка на TikTok-видео.")
@@ -340,6 +385,15 @@ def main() -> None:
         help="Номера или имена через запятую, например: 1,2,3 или @user1,@user2",
     )
 
+    nxt = sub.add_parser("next")
+    nxt.add_argument("--url", required=True)
+    nxt.add_argument("--text", required=True)
+    nxt.add_argument(
+        "--accounts",
+        required=True,
+        help="Номера или имена через запятую, например: 1,2,3,4",
+    )
+
     history = sub.add_parser("history")
     history.add_argument("--limit", type=int, default=20)
 
@@ -351,6 +405,10 @@ def main() -> None:
 
     if args.command == "preview":
         preview_commands(args.url, args.text, args.accounts)
+        return
+
+    if args.command == "next":
+        next_comments(args.url, args.text, args.accounts)
         return
 
     if args.command == "history":
