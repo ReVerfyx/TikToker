@@ -617,6 +617,18 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                     )
 
                 print("[6/7] Ввожу текст...", flush=True)
+
+                # TikTok сначала требует явный клик по самой строке ввода.
+                print("  Нажимаю на строку ввода комментария...", flush=True)
+                try:
+                    input_wrap = page.locator('[data-e2e="comment-input"]').first
+                    input_wrap.scroll_into_view_if_needed(timeout=3000)
+                    input_wrap.click(timeout=5000, force=True)
+                    page.wait_for_timeout(350)
+                except Exception:
+                    pass
+
+                # После открытия строки фокусируем внутренний contenteditable.
                 box.click(force=True, timeout=7000)
                 page.wait_for_timeout(250)
 
