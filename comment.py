@@ -17,6 +17,7 @@ from accounts import parse_netscape
 ROOT = Path(__file__).resolve().parent
 REGISTRY = ROOT / "data" / "accounts.json"
 HISTORY = ROOT / "data" / "comments.csv"
+SCREENSHOT_DIR = ROOT / "data" / "screenshots"
 
 COMMENT_OPEN_SELECTORS = [
     '[data-e2e="comments"][role="tab"]',
@@ -350,6 +351,32 @@ def first_visible(page, selectors: list[str], timeout_ms: int = 7000):
         "Не найден элемент TikTok. Возможно, интерфейс изменился "
         f"или комментарии отключены. Последняя ошибка: {last_error}"
     )
+
+
+def save_screenshot(page, account: dict, label: str) -> Path | None:
+    try:
+        SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+
+        username = str(account.get("username") or "account")
+        safe_user = "".join(
+            ch if ch.isalnum() or ch in {"-", "_"} else "_"
+            for ch in username
+        ).strip("_") or "account"
+
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        path = SCREENSHOT_DIR / f"{stamp}_{safe_user}_{label}.png"
+
+        page.screenshot(
+            path=str(path),
+            full_page=True,
+            animations="disabled",
+        )
+
+        print(f"Скриншот: {path}", flush=True)
+        return path
+    except Exception as exc:
+        print(f"Не удалось сохранить скриншот: {exc}", file=sys.stderr, flush=True)
+        return None
 
 
 def write_history(
@@ -699,7 +726,9 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                     dismiss_overlays(page)
                     post.click(timeout=5000, force=True)
 
-                page.wait_for_timeout(2000)
+                page.wait_for_timeout(2500)
+
+                save_screenshot(page, account, "after_post")
 
                 if "/login" in page.url.lower():
                     raise RuntimeError(
@@ -715,6 +744,12 @@ def post_comment(url: str, text: str, account_name: str) -> None:
                 browser.close()
 
     except Exception as exc:
+        try:
+            if "page" in locals():
+                save_screenshot(page, account, "error")
+        except Exception:
+            pass
+
         write_history(account, url, text, "error", str(exc)[:1000])
         raise
 
