@@ -9,6 +9,24 @@ youtube:
 
   # Небольшая пауза между запросами yt-dlp.
   sleep_requests: 2
+
+  # Если YouTube блокирует IP VPS, бот сам переходит на зеркала.
+  mirror_fallback:
+    enabled: true
+    timeout_seconds: 20
+    max_height: 720
+
+    invidious_instances:
+      - "https://inv.nadeko.net"
+      - "https://invidious.nerdvpn.de"
+      - "https://yt.chocolatemoo53.com"
+      - "https://invidious.tiekoetter.com"
+      - "https://invidious.f5.si"
+
+    piped_instances:
+      - "https://pipedapi.ducks.party"
+      - "https://api.piped.private.coffee"
+      - "https://pipedapi.qwik.space"
   search_results: 20
   min_duration_seconds: 60
   max_duration_seconds: 10800
