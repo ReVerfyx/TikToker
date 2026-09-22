@@ -11,9 +11,11 @@ youtube:
     - "Minecraft"
     - "космос"
     - "ремонт телефона"
-  channels:
-    # Добавляй URL каналов/источников, на публикацию которых у тебя есть право.
-    # - "https://www.youtube.com/@example"
+  channels: []
+  # Добавляй URL каналов/источников, на публикацию которых у тебя есть право.
+  # Пример:
+  # channels:
+  #   - "https://www.youtube.com/@example"
 
 processing:
   part_seconds: 300
